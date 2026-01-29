@@ -627,16 +627,16 @@ class WindowManager:
                 session_count = session_enum.GetCount()
                 
                 # DEBUG: Print all sessions on this device
-                print(f"DEBUG {device_name}: {session_count} sessions")
-                for j in range(session_count):
-                    try:
-                        session_ctl = session_enum.GetSession(j)
-                        session_ctl2 = session_ctl.QueryInterface(IAudioSessionControl2)
-                        sess_pid = session_ctl2.GetProcessId()
-                        print(f"  session[{j}] pid={sess_pid}")
-                    except Exception as e:
-                        print(f"  session[{j}] error: {e}")
-                # END DEBUG
+#                print(f"DEBUG {device_name}: {session_count} sessions")
+#                for j in range(session_count):
+#                    try:
+#                        session_ctl = session_enum.GetSession(j)
+#                        session_ctl2 = session_ctl.QueryInterface(IAudioSessionControl2)
+#                        sess_pid = session_ctl2.GetProcessId()
+#                        print(f"  session[{j}] pid={sess_pid}")
+#                    except Exception as e:
+#                        print(f"  session[{j}] error: {e}")
+#                # END DEBUG
                 
                 for j in range(session_count):
                     try:

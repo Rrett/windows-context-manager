@@ -63,6 +63,8 @@ class WindowManager:
         
         # Volume slider popup
         self.volume_slider_window = None
+        self.slider_start_y = None
+        self.slider_start_volume = None
         
         # Get monitors
         self.monitors = self.get_monitors()
@@ -77,28 +79,41 @@ class WindowManager:
     def init_audio(self):
         """Initialize audio control via pycaw"""
         self.audio_available = False
+        self.volume_interface = None
+        
         try:
             from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
-            from ctypes import cast, POINTER
             from comtypes import CLSCTX_ALL
+            from pycaw.pycaw import IAudioEndpointVolume
+            from ctypes import cast, POINTER
             
             self.AudioUtilities = AudioUtilities
             self.ISimpleAudioVolume = ISimpleAudioVolume
+            self.CLSCTX_ALL = CLSCTX_ALL
+            self.IAudioEndpointVolume = IAudioEndpointVolume
             self.cast = cast
             self.POINTER = POINTER
-            self.CLSCTX_ALL = CLSCTX_ALL
             
-            # Test that we can get the endpoint volume interface
-            from pycaw.pycaw import IAudioEndpointVolume
-            self.IAudioEndpointVolume = IAudioEndpointVolume
+            # Get the speakers/default audio endpoint
+            devices = AudioUtilities.GetSpeakers()
+            
+            # Activate the IAudioEndpointVolume interface
+            interface = devices.Activate(
+                IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            
+            # Cast to the volume interface
+            self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
             
             self.audio_available = True
             print("Audio control initialized successfully")
+            
         except ImportError as e:
             print(f"pycaw not available - audio control disabled: {e}")
             print("Install with: pip install pycaw comtypes")
         except Exception as e:
             print(f"Error initializing audio: {e}")
+            import traceback
+            traceback.print_exc()
     
     def get_audio_session_for_pid(self, pid):
         """Get audio session for a specific process ID"""
@@ -169,28 +184,21 @@ class WindowManager:
     
     def get_system_volume(self):
         """Get system master volume (0.0 to 1.0)"""
-        if not self.audio_available:
+        if not self.audio_available or not self.volume_interface:
             return 1.0
         try:
-            devices = self.AudioUtilities.GetSpeakers()
-            interface = devices.Activate(
-                self.IAudioEndpointVolume._iid_, self.CLSCTX_ALL, None)
-            volume = self.cast(interface, self.POINTER(self.IAudioEndpointVolume))
-            return volume.GetMasterVolumeLevelScalar()
+            return self.volume_interface.GetMasterVolumeLevelScalar()
         except Exception as e:
             print(f"Error getting system volume: {e}")
         return 1.0
     
     def set_system_volume(self, level):
         """Set system master volume (0.0 to 1.0)"""
-        if not self.audio_available:
+        if not self.audio_available or not self.volume_interface:
             return False
         try:
-            devices = self.AudioUtilities.GetSpeakers()
-            interface = devices.Activate(
-                self.IAudioEndpointVolume._iid_, self.CLSCTX_ALL, None)
-            volume = self.cast(interface, self.POINTER(self.IAudioEndpointVolume))
-            volume.SetMasterVolumeLevelScalar(float(level), None)
+            level = max(0.0, min(1.0, float(level)))
+            self.volume_interface.SetMasterVolumeLevelScalar(level, None)
             return True
         except Exception as e:
             print(f"Error setting system volume: {e}")
@@ -198,28 +206,20 @@ class WindowManager:
     
     def get_system_mute(self):
         """Get system mute state"""
-        if not self.audio_available:
+        if not self.audio_available or not self.volume_interface:
             return False
         try:
-            devices = self.AudioUtilities.GetSpeakers()
-            interface = devices.Activate(
-                self.IAudioEndpointVolume._iid_, self.CLSCTX_ALL, None)
-            volume = self.cast(interface, self.POINTER(self.IAudioEndpointVolume))
-            return bool(volume.GetMute())
+            return bool(self.volume_interface.GetMute())
         except Exception as e:
             pass
         return False
     
     def set_system_mute(self, mute):
         """Set system mute state"""
-        if not self.audio_available:
+        if not self.audio_available or not self.volume_interface:
             return False
         try:
-            devices = self.AudioUtilities.GetSpeakers()
-            interface = devices.Activate(
-                self.IAudioEndpointVolume._iid_, self.CLSCTX_ALL, None)
-            volume = self.cast(interface, self.POINTER(self.IAudioEndpointVolume))
-            volume.SetMute(int(mute), None)
+            self.volume_interface.SetMute(int(mute), None)
             return True
         except Exception as e:
             pass
@@ -852,12 +852,12 @@ class WindowManager:
         slider_win.attributes('-topmost', True)
         
         # Calculate position near the button
-        x = event.x_root - 25
+        x = event.x_root - 30
         y = event.y_root - 180  # Position above the button
         
         # Slider height is approximately twice a card height
-        slider_height = 160
-        slider_width = 50
+        slider_height = 170
+        slider_width = 60
         
         slider_win.geometry(f"{slider_width}x{slider_height}+{x}+{y}")
         slider_win.configure(bg=self.colors['card'])
@@ -867,95 +867,111 @@ class WindowManager:
         self.volume_slider_on_close = on_close
         self.volume_slider_on_change = on_change
         
+        # Store initial mouse position and volume for relative movement
+        self.slider_start_y = event.y_root
+        self.slider_start_volume = initial_volume
+        self.current_slider_volume = initial_volume
+        
         # Title label
         title_lbl = tk.Label(slider_win, text=title, bg=self.colors['card'],
                              fg=self.colors['muted'], font=('Segoe UI', 7))
-        title_lbl.pack(pady=(5, 0))
+        title_lbl.pack(pady=(8, 0))
         
         # Volume percentage label
         self.vol_var = tk.StringVar(value=f"{int(initial_volume * 100)}%")
         vol_label = tk.Label(slider_win, textvariable=self.vol_var, bg=self.colors['card'],
-                             fg=self.colors['fg'], font=('Segoe UI', 9, 'bold'))
-        vol_label.pack(pady=(2, 5))
+                             fg=self.colors['fg'], font=('Segoe UI', 11, 'bold'))
+        vol_label.pack(pady=(2, 8))
         
-        # Create canvas for custom slider
-        canvas_height = slider_height - 60
-        self.slider_canvas = tk.Canvas(slider_win, width=30, height=canvas_height,
+        # Create canvas for custom slider visualization
+        canvas_height = slider_height - 70
+        self.slider_canvas = tk.Canvas(slider_win, width=40, height=canvas_height,
                                         bg=self.colors['slider_bg'], highlightthickness=0)
-        self.slider_canvas.pack(pady=(0, 5))
+        self.slider_canvas.pack(pady=(0, 8))
         
-        # Slider parameters
-        self.track_x = 15
+        # Slider visual parameters
+        self.track_x = 20
         self.track_top = 5
         self.track_bottom = canvas_height - 5
         self.track_height = self.track_bottom - self.track_top
         
         # Track background
-        self.slider_canvas.create_rectangle(self.track_x - 3, self.track_top, 
-                                             self.track_x + 3, self.track_bottom,
-                                             fill=self.colors['slider_bg'], 
-                                             outline=self.colors['border'])
+        self.slider_canvas.create_rectangle(self.track_x - 4, self.track_top, 
+                                             self.track_x + 4, self.track_bottom,
+                                             fill=self.colors['border'], 
+                                             outline='')
         
         # Calculate initial handle position based on actual volume
         handle_y = self.track_bottom - (initial_volume * self.track_height)
         
-        # Filled portion
+        # Filled portion (from handle to bottom)
         self.fill_rect = self.slider_canvas.create_rectangle(
-            self.track_x - 3, handle_y, self.track_x + 3, self.track_bottom,
+            self.track_x - 4, handle_y, self.track_x + 4, self.track_bottom,
             fill=self.colors['slider_fg'], outline='')
         
         # Handle
         self.handle = self.slider_canvas.create_oval(
-            self.track_x - 8, handle_y - 8, self.track_x + 8, handle_y + 8,
-            fill=self.colors['accent'], outline=self.colors['fg'])
+            self.track_x - 10, handle_y - 10, self.track_x + 10, handle_y + 10,
+            fill=self.colors['accent'], outline=self.colors['fg'], width=2)
         
-        # Bind motion events to root for tracking mouse while right-click held
-        self.root.bind('<Motion>', self.on_slider_motion)
-        slider_win.bind('<Motion>', self.on_slider_motion)
+        # Sensitivity: pixels of mouse movement for full volume range
+        self.slider_sensitivity = 150  # 150 pixels = 0% to 100%
+        
+        # Bind mouse motion to root window for tracking
+        self.root.bind('<B3-Motion>', self.on_slider_motion)
+        slider_win.bind('<B3-Motion>', self.on_slider_motion)
     
     def on_slider_motion(self, event):
-        """Handle mouse motion while slider is open"""
+        """Handle mouse motion while slider is open - relative movement"""
         if not self.volume_slider_window or not self.slider_canvas:
             return
         
+        if self.slider_start_y is None or self.slider_start_volume is None:
+            return
+        
         try:
-            # Get mouse position relative to canvas
-            canvas_x = self.slider_canvas.winfo_rootx()
-            canvas_y = self.slider_canvas.winfo_rooty()
+            # Calculate relative movement from start position
+            # Moving UP (negative delta) = increase volume
+            # Moving DOWN (positive delta) = decrease volume
+            delta_y = self.slider_start_y - event.y_root
             
-            # Calculate y position relative to canvas
-            y_pos = event.y_root - canvas_y
+            # Convert pixel movement to volume change
+            volume_change = delta_y / self.slider_sensitivity
             
-            # Clamp y position to track bounds
-            y_pos = max(self.track_top, min(self.track_bottom, y_pos))
+            # Calculate new volume
+            new_volume = self.slider_start_volume + volume_change
+            new_volume = max(0.0, min(1.0, new_volume))
             
-            # Calculate volume (inverted - top is high, bottom is low)
-            volume = (self.track_bottom - y_pos) / self.track_height
-            volume = max(0.0, min(1.0, volume))
+            self.current_slider_volume = new_volume
             
-            # Update visual
+            # Update visual - calculate handle position
+            handle_y = self.track_bottom - (new_volume * self.track_height)
+            
+            # Update handle position
             self.slider_canvas.coords(self.handle, 
-                                       self.track_x - 8, y_pos - 8, 
-                                       self.track_x + 8, y_pos + 8)
+                                       self.track_x - 10, handle_y - 10, 
+                                       self.track_x + 10, handle_y + 10)
+            
+            # Update fill rectangle
             self.slider_canvas.coords(self.fill_rect, 
-                                       self.track_x - 3, y_pos, 
-                                       self.track_x + 3, self.track_bottom)
+                                       self.track_x - 4, handle_y, 
+                                       self.track_x + 4, self.track_bottom)
             
             # Update label
-            self.vol_var.set(f"{int(volume * 100)}%")
+            self.vol_var.set(f"{int(new_volume * 100)}%")
             
             # Apply volume change
             if self.volume_slider_on_change:
-                self.volume_slider_on_change(volume)
+                self.volume_slider_on_change(new_volume)
                 
         except Exception as e:
-            pass
+            print(f"Slider motion error: {e}")
     
     def close_volume_slider(self):
         """Close the volume slider"""
         # Unbind motion event
         try:
-            self.root.unbind('<Motion>')
+            self.root.unbind('<B3-Motion>')
         except:
             pass
         
@@ -978,6 +994,9 @@ class WindowManager:
         # Clear references
         self.slider_canvas = None
         self.volume_slider_on_change = None
+        self.slider_start_y = None
+        self.slider_start_volume = None
+        self.current_slider_volume = None
     
     def update_audio_btn(self, hwnd, pid, btn):
         """Update audio button icon based on mute state"""

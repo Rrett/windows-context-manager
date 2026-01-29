@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 import ctypes
-from ctypes import wintypes, cast, POINTER
+from ctypes import wintypes, cast, POINTER, byref
 import win32gui
 import win32con
 import win32process
@@ -25,7 +25,6 @@ class WindowManager:
         self.root = tk.Tk()
         self.root.title("Window Manager")
         
-        # Smaller, sleeker window
         self.root.geometry("420x580")
         self.root.minsize(380, 400)
         self.root.resizable(True, True)
@@ -57,10 +56,7 @@ class WindowManager:
         self.debug_log = []
         self.debug_dir = "windows-manager-debugging"
         
-        # Pin to top variable - explicitly set to False initially
         self.pin_to_top = tk.BooleanVar(value=False)
-        
-        # Explicitly set topmost to False on startup
         self.root.attributes('-topmost', False)
         
         # Track selected windows in order
@@ -68,7 +64,7 @@ class WindowManager:
         self.window_checkboxes = {}
         self.window_cards = {}
         self.windows_list = []
-        self.window_pids = {}  # Map hwnd to pid for audio control
+        self.window_pids = {}
         
         # Volume slider popup
         self.volume_slider_window = None
@@ -78,7 +74,7 @@ class WindowManager:
         self.volume_slider_on_change = None
         self.volume_slider_on_close = None
         self.slider_canvas = None
-        self.slider_is_dragging = False  # Track if we're actively dragging
+        self.slider_is_dragging = False
         
         # Get monitors
         self.monitors = self.get_monitors()
@@ -90,20 +86,17 @@ class WindowManager:
         self.setup_ui()
         self.refresh_windows()
         
-        # Register cleanup on exit
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         atexit.register(self.export_debug_log_on_exit)
     
     def on_closing(self):
-        """Handle window close - export debug log if debug mode was used"""
-        if self.debug_log:  # Only export if there's something to log
+        """Handle window close"""
+        if self.debug_log:
             self.log_debug("Application closing")
             self.export_debug_log()
         self.root.destroy()
     
     def export_debug_log_on_exit(self):
-        """Export debug log on exit (via atexit)"""
-        # This is a backup in case on_closing isn't called
         pass
     
     def log_debug(self, message, level="INFO"):
@@ -112,11 +105,9 @@ class WindowManager:
         entry = f"[{timestamp}] [{level}] {message}"
         self.debug_log.append(entry)
         
-        # Keep log from growing too large
         if len(self.debug_log) > 1000:
             self.debug_log = self.debug_log[-500:]
         
-        # Print to console if debug mode is on
         if self.debug_mode.get():
             print(entry)
     
@@ -125,18 +116,14 @@ class WindowManager:
         if not self.debug_log:
             return None
             
-        # Create debug directory if it doesn't exist
         if not os.path.exists(self.debug_dir):
             os.makedirs(self.debug_dir)
         
-        # Generate filename with unix timestamp
         unix_time = int(time.time())
         filename = os.path.join(self.debug_dir, f"debug_{unix_time}.log")
         
-        # Gather system info
         system_info = self.gather_system_info()
         
-        # Write log file
         try:
             with open(filename, 'w', encoding='utf-8') as f:
                 f.write("=" * 60 + "\n")
@@ -167,18 +154,15 @@ class WindowManager:
         """Gather system information for debugging"""
         info = {}
         
-        # Python version
         import sys
         info["Python Version"] = sys.version
         
-        # OS info
         import platform
         info["OS"] = platform.system()
         info["OS Version"] = platform.version()
         info["OS Release"] = platform.release()
         info["Machine"] = platform.machine()
         
-        # Module versions
         try:
             import pycaw
             info["pycaw Version"] = getattr(pycaw, '__version__', 'unknown')
@@ -202,32 +186,27 @@ class WindowManager:
         except:
             info["pywin32"] = "NOT INSTALLED"
         
-        # Audio status
         info["Audio Available"] = self.audio_available
         info["Volume Interface Type"] = str(type(self.volume_interface)) if self.volume_interface else "None"
-        info["Audio Device Count"] = len(self.audio_devices) if hasattr(self, 'audio_devices') else 0
+        info["Render Device Count"] = len(self._render_devices) if hasattr(self, '_render_devices') else 0
         
-        # List audio devices
-        if hasattr(self, 'audio_devices'):
-            for i, (device_id, device_name) in enumerate(self.audio_devices.items()):
-                info[f"Audio Device {i}"] = device_name
+        # List render devices
+        if hasattr(self, '_render_devices'):
+            for i, (dev_id, dev_name) in enumerate(list(self._render_devices.items())[:20]):
+                info[f"Render Device {i}"] = dev_name
         
-        # Get fresh audio session info for debugging
-        if self.AudioUtilities:
-            try:
-                sessions = self.get_all_audio_sessions_all_devices()
-                info["Audio Session Count"] = len(sessions) if sessions else 0
-                for i, (pid, session_info) in enumerate(list(sessions.items())[:10]):  # Limit to 10
-                    info[f"Session {i}"] = f"PID={pid}, Name={session_info.get('name', 'unknown')}"
-            except Exception as e:
-                info["Audio Session Error"] = str(e)
+        # Get audio sessions from all devices
+        sessions = self.get_all_sessions_all_devices()
+        info["Total Audio Sessions"] = len(sessions)
+        for i, (pid, session_info) in enumerate(list(sessions.items())[:15]):
+            device_name = session_info.get('device_name', 'unknown')[:30]
+            proc_name = session_info.get('name', 'unknown')
+            info[f"Session {i}"] = f"PID={pid}, {proc_name} @ {device_name}"
         
-        # Monitor info
         info["Monitor Count"] = len(self.monitors)
         for i, mon in enumerate(self.monitors):
             info[f"Monitor {i+1}"] = f"{mon['name']} - {mon['resolution']}"
         
-        # Window count
         info["Tracked Windows"] = len(self.windows_list)
         
         return info
@@ -239,9 +218,9 @@ class WindowManager:
         self.AudioUtilities = None
         self.ISimpleAudioVolume = None
         self.IAudioEndpointVolume = None
-        self._speakers = None  # Keep reference to speakers device
-        self.audio_devices = {}  # Store all audio devices
-        self._all_endpoints = []  # Store all audio endpoints
+        self._speakers = None
+        self._render_devices = {}  # Store render (output) devices only
+        self._device_sessions = {}  # Cache for device -> session manager
         
         self.log_debug("Initializing audio...")
         
@@ -264,17 +243,17 @@ class WindowManager:
                     self.log_debug(f"Failed to import AudioUtilities: {e}", "ERROR")
                     return
             
-            # Import comtypes for CLSCTX_ALL
+            # Import comtypes
             try:
                 from comtypes import CLSCTX_ALL
                 self.CLSCTX_ALL = CLSCTX_ALL
             except ImportError:
-                self.CLSCTX_ALL = 0x17  # Fallback value
+                self.CLSCTX_ALL = 0x17
             
-            # Get all audio devices
-            self._enumerate_audio_devices()
+            # Enumerate render devices (speakers/headphones only)
+            self._enumerate_render_devices()
             
-            # Get default speakers device - keep reference
+            # Get default speakers
             self._speakers = self.AudioUtilities.GetSpeakers()
             self.log_debug(f"GetSpeakers() returned: {type(self._speakers)}")
             
@@ -282,7 +261,7 @@ class WindowManager:
                 self.log_debug("GetSpeakers() returned None", "ERROR")
                 return
             
-            # Try EndpointVolume property (new pycaw API)
+            # Try EndpointVolume property
             if hasattr(self._speakers, 'EndpointVolume'):
                 self.log_debug("Found EndpointVolume property (new pycaw API)")
                 try:
@@ -331,178 +310,172 @@ class WindowManager:
             self.log_debug(f"Unexpected error initializing audio: {e}", "ERROR")
             self.log_debug(traceback.format_exc(), "ERROR")
     
-    def _enumerate_audio_devices(self):
-        """Enumerate all audio output devices"""
-        self.audio_devices = {}
-        self._all_endpoints = []
+    def _enumerate_render_devices(self):
+        """Enumerate all audio RENDER (output) devices"""
+        self._render_devices = {}
+        self._render_endpoints = []
         
         try:
-            # Try to get all audio devices
-            if hasattr(self.AudioUtilities, 'GetAllDevices'):
-                devices = self.AudioUtilities.GetAllDevices()
-                for device in devices:
-                    try:
-                        device_id = str(device.id) if hasattr(device, 'id') else str(id(device))
-                        device_name = device.FriendlyName if hasattr(device, 'FriendlyName') else "Unknown"
-                        self.audio_devices[device_id] = device_name
-                        self._all_endpoints.append(device)
-                        self.log_debug(f"Found audio device: {device_name}")
-                    except:
-                        pass
+            from comtypes import CLSCTX_ALL, CoCreateInstance, GUID
+            import comtypes
             
-            # Also try GetSpeakers for each device if possible
-            try:
-                from pycaw.pycaw import AudioUtilities as AU
-                # Get all render devices (speakers/headphones)
-                from comtypes import CLSCTX_ALL
-                from pycaw.pycaw import EDataFlow, DEVICE_STATE
+            # MMDevice API constants
+            eRender = 0  # Output devices
+            eCapture = 1  # Input devices
+            eAll = 2
+            DEVICE_STATE_ACTIVE = 0x00000001
+            
+            # GUIDs
+            CLSID_MMDeviceEnumerator = GUID('{BCDE0395-E52F-467C-8E3D-C4579291692E}')
+            IID_IMMDeviceEnumerator = GUID('{A95664D2-9614-4F35-A746-DE8DB63617E6}')
+            
+            # Import IMMDeviceEnumerator interface
+            from pycaw.pycaw import IMMDeviceEnumerator
+            
+            # Create device enumerator
+            enumerator = CoCreateInstance(
+                CLSID_MMDeviceEnumerator,
+                IMMDeviceEnumerator,
+                CLSCTX_ALL
+            )
+            
+            # Get ONLY render (output) devices
+            collection = enumerator.EnumAudioEndpoints(eRender, DEVICE_STATE_ACTIVE)
+            
+            if collection:
+                count = collection.GetCount()
+                self.log_debug(f"Found {count} active render devices")
                 
-                if hasattr(AU, 'GetAllSessions'):
-                    # This approach gets sessions from all devices
-                    pass
-                    
-            except Exception as e:
-                self.log_debug(f"Extended device enumeration failed: {e}", "WARNING")
-                
+                for i in range(count):
+                    try:
+                        device = collection.Item(i)
+                        if device:
+                            # Get device ID
+                            device_id = device.GetId()
+                            
+                            # Get friendly name via property store
+                            try:
+                                from pycaw.pycaw import PKEY_Device_FriendlyName, IPropertyStore
+                                props = device.OpenPropertyStore(0)  # STGM_READ
+                                name_prop = props.GetValue(PKEY_Device_FriendlyName)
+                                device_name = str(name_prop) if name_prop else f"Device {i}"
+                            except:
+                                device_name = f"Render Device {i}"
+                            
+                            self._render_devices[device_id] = device_name
+                            self._render_endpoints.append((device_id, device, device_name))
+                            self.log_debug(f"Render device {i}: {device_name}")
+                    except Exception as e:
+                        self.log_debug(f"Error getting render device {i}: {e}", "WARNING")
+                        
         except Exception as e:
-            self.log_debug(f"Error enumerating audio devices: {e}", "ERROR")
+            self.log_debug(f"Error enumerating render devices: {e}", "WARNING")
+            self.log_debug(traceback.format_exc(), "WARNING")
     
-    def get_all_audio_sessions_all_devices(self):
-        """Get audio sessions from ALL audio devices, not just the default"""
+    def get_all_sessions_all_devices(self, log_sessions=True):
+        """Get audio sessions from ALL render devices"""
         sessions_by_pid = {}
         
         if not self.AudioUtilities:
             return sessions_by_pid
         
         try:
-            # Method 1: Standard GetAllSessions (default device)
-            sessions = self.AudioUtilities.GetAllSessions()
-            if sessions:
-                for session in sessions:
-                    proc = session.Process
-                    if proc:
-                        sessions_by_pid[proc.pid] = {
-                            'session': session,
-                            'name': proc.name(),
-                            'device': 'default'
-                        }
+            from comtypes import CLSCTX_ALL, GUID
+            from pycaw.pycaw import IAudioSessionManager2, ISimpleAudioVolume
             
-            # Method 2: Try to get sessions from all devices using lower-level API
-            try:
-                from comtypes import CLSCTX_ALL, CoCreateInstance, GUID
-                from pycaw.pycaw import IMMDeviceEnumerator, EDataFlow, DEVICE_STATE
-                
-                # Create device enumerator
-                CLSID_MMDeviceEnumerator = GUID('{BCDE0395-E52F-467C-8E3D-C4579291692E}')
-                IID_IMMDeviceEnumerator = GUID('{A95664D2-9614-4F35-A746-DE8DB63617E6}')
-                
+            IID_IAudioSessionManager2 = GUID('{77AA99A0-1BD6-484F-8BC7-2C654C9A9B6F}')
+            
+            # Iterate through all render endpoints
+            for device_id, device, device_name in self._render_endpoints:
                 try:
-                    enumerator = CoCreateInstance(
-                        CLSID_MMDeviceEnumerator,
-                        IMMDeviceEnumerator,
-                        CLSCTX_ALL
-                    )
+                    # Activate session manager for this device
+                    session_mgr = device.Activate(IID_IAudioSessionManager2, CLSCTX_ALL, None)
                     
-                    # Get all render (output) devices
-                    if hasattr(enumerator, 'EnumAudioEndpoints'):
-                        collection = enumerator.EnumAudioEndpoints(
-                            EDataFlow.eRender.value if hasattr(EDataFlow, 'eRender') else 0,
-                            DEVICE_STATE.ACTIVE.value if hasattr(DEVICE_STATE, 'ACTIVE') else 1
-                        )
+                    if session_mgr:
+                        # Get session enumerator
+                        session_enum = session_mgr.GetSessionEnumerator()
                         
-                        if collection:
-                            count = collection.GetCount()
-                            for i in range(count):
+                        if session_enum:
+                            session_count = session_enum.GetCount()
+                            
+                            for j in range(session_count):
                                 try:
-                                    device = collection.Item(i)
-                                    # Get sessions for this device
-                                    if hasattr(device, 'Activate'):
-                                        from pycaw.pycaw import IAudioSessionManager2
-                                        mgr = device.Activate(
-                                            IAudioSessionManager2._iid_,
-                                            CLSCTX_ALL,
-                                            None
-                                        )
-                                        if mgr:
-                                            session_enum = mgr.GetSessionEnumerator()
-                                            if session_enum:
-                                                sess_count = session_enum.GetCount()
-                                                for j in range(sess_count):
-                                                    try:
-                                                        sess_ctrl = session_enum.GetSession(j)
-                                                        if sess_ctrl:
-                                                            pid = sess_ctrl.GetProcessId()
-                                                            if pid and pid > 0 and pid not in sessions_by_pid:
-                                                                try:
-                                                                    proc = psutil.Process(pid)
-                                                                    sessions_by_pid[pid] = {
-                                                                        'session_ctrl': sess_ctrl,
-                                                                        'name': proc.name(),
-                                                                        'device': f'device_{i}'
-                                                                    }
-                                                                except:
-                                                                    pass
-                                                    except:
-                                                        pass
-                                except:
-                                    pass
+                                    session_ctrl = session_enum.GetSession(j)
+                                    if session_ctrl:
+                                        # Get process ID
+                                        pid = session_ctrl.GetProcessId()
+                                        
+                                        if pid and pid > 0:
+                                            # Get process name
+                                            try:
+                                                proc = psutil.Process(pid)
+                                                proc_name = proc.name()
+                                            except:
+                                                proc_name = f"PID:{pid}"
+                                            
+                                            # Get SimpleAudioVolume interface
+                                            try:
+                                                simple_audio = session_ctrl.QueryInterface(ISimpleAudioVolume)
+                                            except:
+                                                simple_audio = None
+                                            
+                                            # Store session info (don't overwrite if already found)
+                                            if pid not in sessions_by_pid:
+                                                sessions_by_pid[pid] = {
+                                                    'session_ctrl': session_ctrl,
+                                                    'simple_audio': simple_audio,
+                                                    'name': proc_name,
+                                                    'device_id': device_id,
+                                                    'device_name': device_name
+                                                }
+                                except Exception as e:
+                                    pass  # Skip problematic sessions
+                                    
                 except Exception as e:
-                    # This is expected to fail on some systems
+                    # Device might not support session management
                     pass
-                    
-            except ImportError:
-                pass
-            except Exception as e:
+            
+            # Also get sessions via standard API as fallback
+            try:
+                standard_sessions = self.AudioUtilities.GetAllSessions()
+                if standard_sessions:
+                    for session in standard_sessions:
+                        proc = session.Process
+                        if proc and proc.pid not in sessions_by_pid:
+                            sessions_by_pid[proc.pid] = {
+                                'session': session,
+                                'name': proc.name(),
+                                'device_id': 'default',
+                                'device_name': 'Default Device'
+                            }
+            except:
                 pass
                 
         except Exception as e:
-            self.log_debug(f"Error getting audio sessions from all devices: {e}", "ERROR")
+            if log_sessions:
+                self.log_debug(f"Error getting sessions from all devices: {e}", "ERROR")
         
         return sessions_by_pid
     
     def get_fresh_audio_sessions(self, log_sessions=True):
-        """Get fresh audio sessions from all devices - don't cache COM objects"""
-        if not self.AudioUtilities:
-            return {}
-        
-        sessions_by_pid = {}
-        try:
-            # Get sessions from all devices
-            all_sessions = self.get_all_audio_sessions_all_devices()
-            
-            for pid, session_info in all_sessions.items():
-                if 'session' in session_info:
-                    sessions_by_pid[pid] = session_info['session']
-                elif 'session_ctrl' in session_info:
-                    # Wrap the session control in a compatible format
-                    sessions_by_pid[pid] = session_info
-            
-            # Also get standard sessions as fallback
-            sessions = self.AudioUtilities.GetAllSessions()
-            if sessions:
-                for session in sessions:
-                    proc = session.Process
-                    if proc and proc.pid not in sessions_by_pid:
-                        sessions_by_pid[proc.pid] = session
-                        
-        except Exception as e:
-            if log_sessions:
-                self.log_debug(f"Error getting audio sessions: {e}", "ERROR")
-        
-        return sessions_by_pid
+        """Get fresh audio sessions from all devices"""
+        return self.get_all_sessions_all_devices(log_sessions=log_sessions)
     
     def get_audio_session_for_pid(self, pid, log_lookup=True):
-        """Get audio session for a specific process ID - always fetch fresh"""
+        """Get audio session for a specific process ID"""
         if not self.AudioUtilities or not pid:
             return None
         
-        sessions = self.get_fresh_audio_sessions(log_sessions=log_lookup)
+        sessions = self.get_all_sessions_all_devices(log_sessions=log_lookup)
         
         # Direct PID match
         if pid in sessions:
+            if log_lookup:
+                device_name = sessions[pid].get('device_name', 'unknown')
+                self.log_debug(f"Found audio for PID {pid} on device: {device_name}")
             return sessions[pid]
         
-        # Try to find by process tree (child processes)
+        # Try to find by process tree
         try:
             proc = psutil.Process(pid)
             # Check parent
@@ -525,28 +498,32 @@ class WindowManager:
     
     def get_app_volume(self, pid, log_lookup=True):
         """Get volume level for an app (0.0 to 1.0)"""
-        session = self.get_audio_session_for_pid(pid, log_lookup=log_lookup)
-        if not session:
+        session_info = self.get_audio_session_for_pid(pid, log_lookup=log_lookup)
+        if not session_info:
             return None
         
         try:
-            # Handle dict-wrapped session from multi-device enumeration
-            if isinstance(session, dict):
-                if 'session_ctrl' in session:
-                    sess_ctrl = session['session_ctrl']
-                    if hasattr(sess_ctrl, 'QueryInterface') and self.ISimpleAudioVolume:
-                        volume_interface = sess_ctrl.QueryInterface(self.ISimpleAudioVolume)
-                        return volume_interface.GetMasterVolume()
-                return None
+            # Try simple_audio interface (from multi-device enumeration)
+            if 'simple_audio' in session_info and session_info['simple_audio']:
+                return session_info['simple_audio'].GetMasterVolume()
             
-            # Try SimpleAudioVolume interface
-            if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
-                return session.SimpleAudioVolume.GetMasterVolume()
+            # Try session_ctrl with QueryInterface
+            if 'session_ctrl' in session_info and self.ISimpleAudioVolume:
+                try:
+                    simple_audio = session_info['session_ctrl'].QueryInterface(self.ISimpleAudioVolume)
+                    return simple_audio.GetMasterVolume()
+                except:
+                    pass
             
-            # Try _ctl.QueryInterface
-            if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
-                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
-                return volume_interface.GetMasterVolume()
+            # Try standard session object
+            if 'session' in session_info:
+                session = session_info['session']
+                if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
+                    return session.SimpleAudioVolume.GetMasterVolume()
+                if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
+                    volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
+                    return volume_interface.GetMasterVolume()
+                    
         except Exception as e:
             if log_lookup:
                 self.log_debug(f"Error getting app volume for PID {pid}: {e}", "WARNING")
@@ -554,33 +531,38 @@ class WindowManager:
     
     def set_app_volume(self, pid, level, log_lookup=True):
         """Set volume level for an app (0.0 to 1.0)"""
-        session = self.get_audio_session_for_pid(pid, log_lookup=log_lookup)
-        if not session:
+        session_info = self.get_audio_session_for_pid(pid, log_lookup=log_lookup)
+        if not session_info:
             return False
         
         try:
             level = max(0.0, min(1.0, float(level)))
             
-            # Handle dict-wrapped session from multi-device enumeration
-            if isinstance(session, dict):
-                if 'session_ctrl' in session:
-                    sess_ctrl = session['session_ctrl']
-                    if hasattr(sess_ctrl, 'QueryInterface') and self.ISimpleAudioVolume:
-                        volume_interface = sess_ctrl.QueryInterface(self.ISimpleAudioVolume)
-                        volume_interface.SetMasterVolume(level, None)
-                        return True
-                return False
-            
-            # Try SimpleAudioVolume interface
-            if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
-                session.SimpleAudioVolume.SetMasterVolume(level, None)
+            # Try simple_audio interface
+            if 'simple_audio' in session_info and session_info['simple_audio']:
+                session_info['simple_audio'].SetMasterVolume(level, None)
                 return True
             
-            # Try _ctl.QueryInterface
-            if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
-                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
-                volume_interface.SetMasterVolume(level, None)
-                return True
+            # Try session_ctrl with QueryInterface
+            if 'session_ctrl' in session_info and self.ISimpleAudioVolume:
+                try:
+                    simple_audio = session_info['session_ctrl'].QueryInterface(self.ISimpleAudioVolume)
+                    simple_audio.SetMasterVolume(level, None)
+                    return True
+                except:
+                    pass
+            
+            # Try standard session object
+            if 'session' in session_info:
+                session = session_info['session']
+                if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
+                    session.SimpleAudioVolume.SetMasterVolume(level, None)
+                    return True
+                if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
+                    volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
+                    volume_interface.SetMasterVolume(level, None)
+                    return True
+                    
         except Exception as e:
             if log_lookup:
                 self.log_debug(f"Error setting app volume for PID {pid}: {e}", "WARNING")
@@ -588,28 +570,32 @@ class WindowManager:
     
     def get_app_mute(self, pid, log_lookup=True):
         """Get mute state for an app"""
-        session = self.get_audio_session_for_pid(pid, log_lookup=log_lookup)
-        if not session:
+        session_info = self.get_audio_session_for_pid(pid, log_lookup=log_lookup)
+        if not session_info:
             return None
         
         try:
-            # Handle dict-wrapped session from multi-device enumeration
-            if isinstance(session, dict):
-                if 'session_ctrl' in session:
-                    sess_ctrl = session['session_ctrl']
-                    if hasattr(sess_ctrl, 'QueryInterface') and self.ISimpleAudioVolume:
-                        volume_interface = sess_ctrl.QueryInterface(self.ISimpleAudioVolume)
-                        return bool(volume_interface.GetMute())
-                return None
+            # Try simple_audio interface
+            if 'simple_audio' in session_info and session_info['simple_audio']:
+                return bool(session_info['simple_audio'].GetMute())
             
-            # Try SimpleAudioVolume interface
-            if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
-                return bool(session.SimpleAudioVolume.GetMute())
+            # Try session_ctrl with QueryInterface
+            if 'session_ctrl' in session_info and self.ISimpleAudioVolume:
+                try:
+                    simple_audio = session_info['session_ctrl'].QueryInterface(self.ISimpleAudioVolume)
+                    return bool(simple_audio.GetMute())
+                except:
+                    pass
             
-            # Try _ctl.QueryInterface
-            if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
-                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
-                return bool(volume_interface.GetMute())
+            # Try standard session object
+            if 'session' in session_info:
+                session = session_info['session']
+                if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
+                    return bool(session.SimpleAudioVolume.GetMute())
+                if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
+                    volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
+                    return bool(volume_interface.GetMute())
+                    
         except Exception as e:
             if log_lookup:
                 self.log_debug(f"Error getting app mute for PID {pid}: {e}", "WARNING")
@@ -617,31 +603,36 @@ class WindowManager:
     
     def set_app_mute(self, pid, mute, log_lookup=True):
         """Set mute state for an app"""
-        session = self.get_audio_session_for_pid(pid, log_lookup=log_lookup)
-        if not session:
+        session_info = self.get_audio_session_for_pid(pid, log_lookup=log_lookup)
+        if not session_info:
             return False
         
         try:
-            # Handle dict-wrapped session from multi-device enumeration
-            if isinstance(session, dict):
-                if 'session_ctrl' in session:
-                    sess_ctrl = session['session_ctrl']
-                    if hasattr(sess_ctrl, 'QueryInterface') and self.ISimpleAudioVolume:
-                        volume_interface = sess_ctrl.QueryInterface(self.ISimpleAudioVolume)
-                        volume_interface.SetMute(int(mute), None)
-                        return True
-                return False
-            
-            # Try SimpleAudioVolume interface
-            if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
-                session.SimpleAudioVolume.SetMute(int(mute), None)
+            # Try simple_audio interface
+            if 'simple_audio' in session_info and session_info['simple_audio']:
+                session_info['simple_audio'].SetMute(int(mute), None)
                 return True
             
-            # Try _ctl.QueryInterface
-            if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
-                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
-                volume_interface.SetMute(int(mute), None)
-                return True
+            # Try session_ctrl with QueryInterface
+            if 'session_ctrl' in session_info and self.ISimpleAudioVolume:
+                try:
+                    simple_audio = session_info['session_ctrl'].QueryInterface(self.ISimpleAudioVolume)
+                    simple_audio.SetMute(int(mute), None)
+                    return True
+                except:
+                    pass
+            
+            # Try standard session object
+            if 'session' in session_info:
+                session = session_info['session']
+                if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
+                    session.SimpleAudioVolume.SetMute(int(mute), None)
+                    return True
+                if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
+                    volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
+                    volume_interface.SetMute(int(mute), None)
+                    return True
+                    
         except Exception as e:
             if log_lookup:
                 self.log_debug(f"Error setting app mute for PID {pid}: {e}", "WARNING")
@@ -657,7 +648,6 @@ class WindowManager:
             return vol
         except Exception as e:
             self.log_debug(f"Error getting system volume: {e}", "ERROR")
-            # Try to reinitialize
             self.log_debug("Attempting to reinitialize audio...", "INFO")
             self.init_audio()
             if self.volume_interface:
@@ -678,7 +668,6 @@ class WindowManager:
             return True
         except Exception as e:
             self.log_debug(f"Error setting system volume: {e}", "ERROR")
-            # Try to reinitialize
             self.init_audio()
             if self.volume_interface:
                 try:
@@ -722,7 +711,6 @@ class WindowManager:
             self.log_debug("Debug mode enabled")
             self.status_var.set("Debug mode ON - actions will be logged")
         else:
-            # Export log when turning off debug mode
             self.log_debug("Debug mode disabled - exporting log")
             self.export_debug_log()
     
@@ -880,7 +868,6 @@ class WindowManager:
         title_label = ttk.Label(header_frame, text="Window Manager", style='Title.TLabel')
         title_label.pack(side=tk.LEFT)
         
-        # Debug checkbox
         debug_cb = ttk.Checkbutton(header_frame, text="🐛", 
                                     variable=self.debug_mode,
                                     command=self.toggle_debug)
@@ -947,7 +934,6 @@ class WindowManager:
         audio_frame = ttk.Frame(main_frame)
         audio_frame.pack(fill=tk.X, pady=(0, 10))
         
-        # Audio status indicator
         audio_status = "🔊" if self.audio_available else "🔇❌"
         ttk.Label(audio_frame, text=f"Audio {audio_status}:", style='Muted.TLabel').pack(side=tk.LEFT)
         
@@ -965,7 +951,6 @@ class WindowManager:
                                           command=self.bulk_unmute)
         self.bulk_unmute_btn.pack(side=tk.LEFT, padx=(0, 4))
         
-        # Volume button with right-click-hold for slider
         self.bulk_volume_btn = tk.Button(audio_frame, text="🎚️ Vol",
                                           bg=self.colors['card'], fg=self.colors['fg'],
                                           font=('Segoe UI', 9), bd=0, padx=10, pady=4,
@@ -1104,8 +1089,9 @@ class WindowManager:
         """Refresh the list of windows"""
         self.log_debug("Refreshing window list...")
         
-        # Refresh monitors too
+        # Refresh monitors and audio devices
         self.monitors = self.get_monitors()
+        self._enumerate_render_devices()
         
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
@@ -1118,21 +1104,15 @@ class WindowManager:
         old_selection = list(self.selected_windows.keys())
         self.selected_windows.clear()
         
-        # Get current audio sessions for display - log this one
-        audio_sessions = self.get_fresh_audio_sessions(log_sessions=True)
-        audio_pids = set()
-        
-        # Extract PIDs from sessions (handle both regular sessions and dict-wrapped ones)
-        for pid, session in audio_sessions.items():
-            audio_pids.add(pid)
+        # Get all audio sessions from all devices
+        audio_sessions = self.get_all_sessions_all_devices(log_sessions=True)
+        audio_pids = set(audio_sessions.keys())
         
         session_names = []
-        for pid in audio_pids:
-            try:
-                proc = psutil.Process(pid)
-                session_names.append(f"{proc.name()}(PID:{pid})")
-            except:
-                session_names.append(f"PID:{pid}")
+        for pid, info in audio_sessions.items():
+            device = info.get('device_name', 'unknown')[:20]
+            name = info.get('name', f'PID:{pid}')
+            session_names.append(f"{name}@{device}")
         if session_names:
             self.log_debug(f"Audio sessions: {', '.join(session_names)}")
         
@@ -1155,7 +1135,6 @@ class WindowManager:
         def sort_key(item):
             hwnd, title, process, pid = item
             has_audio = pid in audio_pids
-            # Also check if any child process has audio
             if not has_audio and pid:
                 try:
                     proc = psutil.Process(pid)
@@ -1165,7 +1144,6 @@ class WindowManager:
                             break
                 except:
                     pass
-            # Sort by: has_audio (True first = 0), then process name
             return (0 if has_audio else 1, process.lower())
         
         windows.sort(key=sort_key)
@@ -1173,7 +1151,6 @@ class WindowManager:
         for i, (hwnd, title, process, pid) in enumerate(windows):
             self.window_pids[hwnd] = pid
             has_audio = pid in audio_pids
-            # Also check children for audio
             if not has_audio and pid:
                 try:
                     proc = psutil.Process(pid)
@@ -1232,14 +1209,11 @@ class WindowManager:
         
         for i, mon in enumerate(self.monitors):
             if i == current_monitor_idx:
-                # Current monitor - greyed out with star
                 menu.add_command(label=f"★ {mon['short_name']}", state='disabled')
             else:
-                # Other monitors - clickable
                 menu.add_command(label=f"  {mon['short_name']}", 
                                command=lambda h=hwnd, m=mon: self.quick_move_to_monitor(h, m))
         
-        # Show menu at button position
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
@@ -1319,7 +1293,6 @@ class WindowManager:
         info = tk.Frame(left, bg=base_bg)
         info.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
         
-        # Audio indicator
         audio_indicator = " 🔊" if has_audio else ""
         
         proc_label = tk.Label(info, text=process + audio_indicator, bg=base_bg,
@@ -1341,20 +1314,16 @@ class WindowManager:
                      'activebackground': self.colors['card_hover'],
                      'activeforeground': self.colors['fg'], 'cursor': 'hand2'}
         
-        # Monitor swap button (◀ with dropdown)
         monitor_btn = tk.Button(actions, text="◀", **btn_style)
         monitor_btn.configure(command=lambda e=None, h=hwnd, b=monitor_btn: self.show_monitor_menu_btn(h, b))
         monitor_btn.pack(side=tk.LEFT)
         
-        # Focus button
         focus_btn = tk.Button(actions, text="◉", command=lambda h=hwnd: self.focus_window(h), **btn_style)
         focus_btn.pack(side=tk.LEFT)
         
-        # Min/Max toggle button
         minmax_btn = tk.Button(actions, text="□", command=lambda h=hwnd: self.toggle_minmax(h), **btn_style)
         minmax_btn.pack(side=tk.LEFT)
         
-        # Audio mute toggle button with right-click-hold for slider
         is_muted = self.get_app_mute(pid, log_lookup=False) if pid and has_audio else False
         audio_icon = "🔇" if is_muted else "🔊"
         audio_btn = tk.Button(actions, text=audio_icon, **btn_style)
@@ -1379,7 +1348,6 @@ class WindowManager:
             'has_audio': has_audio
         }
         
-        # Hover effects
         def on_enter(e):
             current_base = self.window_cards[hwnd]['base_bg']
             hover_bg = self.colors['card_hover'] if current_base == self.colors['card'] else '#243454'
@@ -1414,7 +1382,6 @@ class WindowManager:
     
     def show_monitor_menu_btn(self, hwnd, btn):
         """Show monitor menu positioned relative to button"""
-        # Create a fake event with the button's position
         x = btn.winfo_rootx()
         y = btn.winfo_rooty() + btn.winfo_height()
         
@@ -1426,10 +1393,8 @@ class WindowManager:
         
         for i, mon in enumerate(self.monitors):
             if i == current_monitor_idx:
-                # Current monitor - greyed out with star
                 menu.add_command(label=f"★ {mon['short_name']}", state='disabled')
             else:
-                # Other monitors - clickable
                 menu.add_command(label=f"  {mon['short_name']}", 
                                command=lambda h=hwnd, m=mon: self.quick_move_to_monitor(h, m))
         
@@ -1504,7 +1469,6 @@ class WindowManager:
         selected = self.get_selected_windows()
         
         if not selected:
-            # No selection - control system volume
             current_volume = self.get_system_volume()
             self.log_debug(f"Opening system volume slider, current: {current_volume:.0%}")
             
@@ -1516,7 +1480,6 @@ class WindowManager:
             
             self.show_volume_slider(event, current_volume, on_change, on_close, "System")
         else:
-            # Control selected windows
             self.log_debug(f"Opening bulk volume slider for {len(selected)} apps")
             
             def on_change(v):
@@ -1533,88 +1496,72 @@ class WindowManager:
         self.close_volume_slider()
     
     def show_volume_slider(self, event, initial_volume, on_change, on_close=None, title="Volume"):
-        """Create a floating volume slider window that stays open while right-click is held"""
-        # Close any existing slider
+        """Create a floating volume slider window"""
         self.close_volume_slider()
         
-        # Create popup window
         slider_win = tk.Toplevel(self.root)
         slider_win.overrideredirect(True)
         slider_win.attributes('-topmost', True)
         
-        # Calculate position near the button
         x = event.x_root - 30
-        y = event.y_root - 180  # Position above the button
+        y = event.y_root - 180
         
-        # Slider height is approximately twice a card height
         slider_height = 170
         slider_width = 60
         
         slider_win.geometry(f"{slider_width}x{slider_height}+{x}+{y}")
         slider_win.configure(bg=self.colors['card'])
         
-        # Store reference and callbacks
         self.volume_slider_window = slider_win
         self.volume_slider_on_close = on_close
         self.volume_slider_on_change = on_change
         
-        # Store initial mouse position and volume for relative movement
         self.slider_start_y = event.y_root
         self.slider_start_volume = initial_volume
         self.current_slider_volume = initial_volume
-        self.slider_is_dragging = True  # Mark that we're dragging
+        self.slider_is_dragging = True
         
-        # Title label
         title_lbl = tk.Label(slider_win, text=title, bg=self.colors['card'],
                              fg=self.colors['muted'], font=('Segoe UI', 7))
         title_lbl.pack(pady=(8, 0))
         
-        # Volume percentage label
         self.vol_var = tk.StringVar(value=f"{int(initial_volume * 100)}%")
         vol_label = tk.Label(slider_win, textvariable=self.vol_var, bg=self.colors['card'],
                              fg=self.colors['fg'], font=('Segoe UI', 11, 'bold'))
         vol_label.pack(pady=(2, 8))
         
-        # Create canvas for custom slider visualization
         canvas_height = slider_height - 70
         self.slider_canvas = tk.Canvas(slider_win, width=40, height=canvas_height,
                                         bg=self.colors['slider_bg'], highlightthickness=0)
         self.slider_canvas.pack(pady=(0, 8))
         
-        # Slider visual parameters
         self.track_x = 20
         self.track_top = 5
         self.track_bottom = canvas_height - 5
         self.track_height = self.track_bottom - self.track_top
         
-        # Track background
         self.slider_canvas.create_rectangle(self.track_x - 4, self.track_top, 
                                              self.track_x + 4, self.track_bottom,
                                              fill=self.colors['border'], 
                                              outline='')
         
-        # Calculate initial handle position based on actual volume
         handle_y = self.track_bottom - (initial_volume * self.track_height)
         
-        # Filled portion (from handle to bottom)
         self.fill_rect = self.slider_canvas.create_rectangle(
             self.track_x - 4, handle_y, self.track_x + 4, self.track_bottom,
             fill=self.colors['slider_fg'], outline='')
         
-        # Handle
         self.handle = self.slider_canvas.create_oval(
             self.track_x - 10, handle_y - 10, self.track_x + 10, handle_y + 10,
             fill=self.colors['accent'], outline=self.colors['fg'], width=2)
         
-        # Sensitivity: pixels of mouse movement for full volume range
-        self.slider_sensitivity = 150  # 150 pixels = 0% to 100%
+        self.slider_sensitivity = 150
         
-        # Bind mouse motion globally for tracking during right-click hold
         self.root.bind('<Motion>', self.on_slider_motion)
         slider_win.bind('<Motion>', self.on_slider_motion)
     
     def on_slider_motion(self, event):
-        """Handle mouse motion while slider is open - relative movement"""
+        """Handle mouse motion while slider is open"""
         if not self.volume_slider_window or not self.slider_canvas:
             return
         
@@ -1625,59 +1572,42 @@ class WindowManager:
             return
         
         try:
-            # Calculate relative movement from start position
-            # Moving UP (negative delta) = increase volume
-            # Moving DOWN (positive delta) = decrease volume
             delta_y = self.slider_start_y - event.y_root
-            
-            # Convert pixel movement to volume change
             volume_change = delta_y / self.slider_sensitivity
-            
-            # Calculate new volume
             new_volume = self.slider_start_volume + volume_change
             new_volume = max(0.0, min(1.0, new_volume))
             
             self.current_slider_volume = new_volume
             
-            # Update visual - calculate handle position
             handle_y = self.track_bottom - (new_volume * self.track_height)
             
-            # Update handle position
             self.slider_canvas.coords(self.handle, 
                                        self.track_x - 10, handle_y - 10, 
                                        self.track_x + 10, handle_y + 10)
             
-            # Update fill rectangle
             self.slider_canvas.coords(self.fill_rect, 
                                        self.track_x - 4, handle_y, 
                                        self.track_x + 4, self.track_bottom)
             
-            # Update label
             self.vol_var.set(f"{int(new_volume * 100)}%")
             
-            # Apply volume change (no logging during drag)
             if self.volume_slider_on_change:
                 self.volume_slider_on_change(new_volume)
                 
-        except Exception as e:
-            # Don't log during slider motion to avoid spam
+        except Exception:
             pass
     
     def close_volume_slider(self):
         """Close the volume slider"""
-        # Mark that we're no longer dragging
         self.slider_is_dragging = False
         
-        # Unbind motion event
         try:
             self.root.unbind('<Motion>')
         except:
             pass
         
-        # Get final volume for logging
         final_volume = self.current_slider_volume if self.current_slider_volume is not None else 1.0
         
-        # Call on_close callback if set (with final volume)
         if self.volume_slider_on_close:
             try:
                 self.volume_slider_on_close(final_volume)
@@ -1685,7 +1615,6 @@ class WindowManager:
                 pass
             self.volume_slider_on_close = None
         
-        # Destroy slider window
         if self.volume_slider_window:
             try:
                 self.volume_slider_window.destroy()
@@ -1693,7 +1622,6 @@ class WindowManager:
                 pass
             self.volume_slider_window = None
         
-        # Clear references
         self.slider_canvas = None
         self.volume_slider_on_change = None
         self.slider_start_y = None

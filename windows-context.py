@@ -72,17 +72,22 @@ class WindowManager:
         self.setup_ui()
         self.refresh_windows()
     
-    def temporarily_pin(self):
-        """Temporarily pin window to top during actions"""
-        was_pinned = self.pin_to_top.get()
-        if not was_pinned:
-            self.root.attributes('-topmost', True)
-        return was_pinned
-    
-    def restore_pin_state(self, was_pinned):
-        """Restore pin state after action"""
-        if not was_pinned:
-            self.root.after(500, lambda: self.root.attributes('-topmost', self.pin_to_top.get()))
+    def ensure_topmost_during_action(self):
+        """Ensure window stays on top during an action, then restore original state"""
+        # Always force to top during action
+        self.root.attributes('-topmost', True)
+        self.root.lift()
+        self.root.update()
+        
+        # Schedule restore to user's preference
+        def restore():
+            should_be_top = self.pin_to_top.get()
+            self.root.attributes('-topmost', should_be_top)
+        
+        # Cancel any pending restore and schedule new one
+        if hasattr(self, '_restore_job') and self._restore_job:
+            self.root.after_cancel(self._restore_job)
+        self._restore_job = self.root.after(300, restore)
     
     def is_window_maximized(self, hwnd):
         """Check if a window is maximized"""
@@ -360,9 +365,6 @@ class WindowManager:
         select_frame.pack(fill=tk.X, pady=(0, 10))
         
         ttk.Label(select_frame, text="Select:", style='Muted.TLabel').pack(side=tk.LEFT)
-        
-        # Minimal text buttons
-        btn_style_mini = {'font': ('Segoe UI', 8), 'padding': (4, 2)}
         
         ttk.Button(select_frame, text="All", width=4, style='Small.TButton',
                    command=self.select_all).pack(side=tk.LEFT, padx=(8, 2))
@@ -720,41 +722,37 @@ class WindowManager:
     
     def focus_window(self, hwnd):
         """Focus a window"""
-        was_pinned = self.temporarily_pin()
+        self.ensure_topmost_during_action()
         try:
             if win32gui.IsIconic(hwnd):
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
             win32gui.SetForegroundWindow(hwnd)
         except Exception as e:
             self.status_var.set(f"Error: {e}")
-        self.restore_pin_state(was_pinned)
             
     def minimize_window(self, hwnd):
         """Minimize a window"""
-        was_pinned = self.temporarily_pin()
+        self.ensure_topmost_during_action()
         try:
             win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
         except Exception as e:
             self.status_var.set(f"Error: {e}")
-        self.restore_pin_state(was_pinned)
             
     def maximize_window(self, hwnd):
         """Maximize a window"""
-        was_pinned = self.temporarily_pin()
+        self.ensure_topmost_during_action()
         try:
             win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
         except Exception as e:
             self.status_var.set(f"Error: {e}")
-        self.restore_pin_state(was_pinned)
             
     def move_to_monitor(self):
         """Move selected windows to chosen monitor"""
-        was_pinned = self.temporarily_pin()
+        self.ensure_topmost_during_action()
         selected = self.get_selected_windows()
         
         if not selected:
             self.status_var.set("No windows selected")
-            self.restore_pin_state(was_pinned)
             return
             
         monitor_name = self.monitor_var.get()
@@ -767,7 +765,6 @@ class WindowManager:
                 
         if not target_monitor:
             self.status_var.set("Monitor not found")
-            self.restore_pin_state(was_pinned)
             return
             
         work_area = target_monitor['work_area']
@@ -807,7 +804,6 @@ class WindowManager:
                 print(f"Error moving window {hwnd}: {e}")
                 
         self.status_var.set(f"Moved {moved_count} window(s)")
-        self.restore_pin_state(was_pinned)
     
     def get_target_monitor(self):
         """Get the work area for the selected monitor"""
@@ -821,12 +817,11 @@ class WindowManager:
     
     def split_vertical(self):
         """Split first two windows side by side"""
-        was_pinned = self.temporarily_pin()
+        self.ensure_topmost_during_action()
         selected = self.get_selected_windows()
         
         if len(selected) < 2:
             self.status_var.set("Select at least 2 windows")
-            self.restore_pin_state(was_pinned)
             return
             
         hwnd1, hwnd2 = selected[0], selected[1]
@@ -851,16 +846,14 @@ class WindowManager:
             self.status_var.set("Split side by side")
         except Exception as e:
             self.status_var.set(f"Error: {e}")
-        self.restore_pin_state(was_pinned)
     
     def split_horizontal(self):
         """Split first two windows top/bottom"""
-        was_pinned = self.temporarily_pin()
+        self.ensure_topmost_during_action()
         selected = self.get_selected_windows()
         
         if len(selected) < 2:
             self.status_var.set("Select at least 2 windows")
-            self.restore_pin_state(was_pinned)
             return
             
         hwnd1, hwnd2 = selected[0], selected[1]
@@ -885,7 +878,6 @@ class WindowManager:
             self.status_var.set("Split top/bottom")
         except Exception as e:
             self.status_var.set(f"Error: {e}")
-        self.restore_pin_state(was_pinned)
     
     def apply_audio_device(self):
         """Apply audio device (shows info about limitations)"""

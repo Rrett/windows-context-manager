@@ -1,12 +1,11 @@
 import tkinter as tk
 from tkinter import ttk
 import ctypes
-from ctypes import wintypes, Structure, POINTER, cast, HRESULT
+from ctypes import wintypes
 import win32gui
 import win32con
 import win32process
 import win32api
-from comtypes import GUID, IUnknown, COMMETHOD, CoCreateInstance, CLSCTX_ALL
 import psutil
 from collections import OrderedDict
 
@@ -15,25 +14,6 @@ DWMWA_CLOAKED = 14
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_APPWINDOW = 0x00040000
-
-# Audio API interfaces
-class IAudioEndpointVolume(IUnknown):
-    _iid_ = GUID('{5CDF2C82-841E-4546-9722-0CF74078229A}')
-    _methods_ = [
-        COMMETHOD([], HRESULT, 'RegisterControlChangeNotify', (['in'], POINTER(IUnknown), 'pNotify')),
-        COMMETHOD([], HRESULT, 'UnregisterControlChangeNotify', (['in'], POINTER(IUnknown), 'pNotify')),
-        COMMETHOD([], HRESULT, 'GetChannelCount', (['out', 'retval'], POINTER(ctypes.c_uint), 'pnChannelCount')),
-        COMMETHOD([], HRESULT, 'SetMasterVolumeLevel', (['in'], ctypes.c_float, 'fLevelDB'), (['in'], POINTER(GUID), 'pguidEventContext')),
-        COMMETHOD([], HRESULT, 'SetMasterVolumeLevelScalar', (['in'], ctypes.c_float, 'fLevel'), (['in'], POINTER(GUID), 'pguidEventContext')),
-        COMMETHOD([], HRESULT, 'GetMasterVolumeLevel', (['out', 'retval'], POINTER(ctypes.c_float), 'pfLevelDB')),
-        COMMETHOD([], HRESULT, 'GetMasterVolumeLevelScalar', (['out', 'retval'], POINTER(ctypes.c_float), 'pfLevel')),
-        COMMETHOD([], HRESULT, 'SetChannelVolumeLevel', (['in'], ctypes.c_uint, 'nChannel'), (['in'], ctypes.c_float, 'fLevelDB'), (['in'], POINTER(GUID), 'pguidEventContext')),
-        COMMETHOD([], HRESULT, 'SetChannelVolumeLevelScalar', (['in'], ctypes.c_uint, 'nChannel'), (['in'], ctypes.c_float, 'fLevel'), (['in'], POINTER(GUID), 'pguidEventContext')),
-        COMMETHOD([], HRESULT, 'GetChannelVolumeLevel', (['in'], ctypes.c_uint, 'nChannel'), (['out', 'retval'], POINTER(ctypes.c_float), 'pfLevelDB')),
-        COMMETHOD([], HRESULT, 'GetChannelVolumeLevelScalar', (['in'], ctypes.c_uint, 'nChannel'), (['out', 'retval'], POINTER(ctypes.c_float), 'pfLevel')),
-        COMMETHOD([], HRESULT, 'SetMute', (['in'], ctypes.c_int, 'bMute'), (['in'], POINTER(GUID), 'pguidEventContext')),
-        COMMETHOD([], HRESULT, 'GetMute', (['out', 'retval'], POINTER(ctypes.c_int), 'pbMute')),
-    ]
 
 
 class WindowManager:
@@ -81,14 +61,13 @@ class WindowManager:
         self.windows_list = []
         self.window_pids = {}  # Map hwnd to pid for audio control
         
-        # Audio session manager
-        self.audio_sessions = {}
+        # Volume slider popup
         self.volume_slider_window = None
         
         # Get monitors
         self.monitors = self.get_monitors()
         
-        # Initialize pycaw
+        # Initialize audio
         self.init_audio()
         
         self.setup_styles()
@@ -97,15 +76,29 @@ class WindowManager:
     
     def init_audio(self):
         """Initialize audio control via pycaw"""
+        self.audio_available = False
         try:
             from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
+            from ctypes import cast, POINTER
+            from comtypes import CLSCTX_ALL
+            
             self.AudioUtilities = AudioUtilities
             self.ISimpleAudioVolume = ISimpleAudioVolume
+            self.cast = cast
+            self.POINTER = POINTER
+            self.CLSCTX_ALL = CLSCTX_ALL
+            
+            # Test that we can get the endpoint volume interface
+            from pycaw.pycaw import IAudioEndpointVolume
+            self.IAudioEndpointVolume = IAudioEndpointVolume
+            
             self.audio_available = True
-        except ImportError:
-            print("pycaw not available - audio control disabled")
-            print("Install with: pip install pycaw")
-            self.audio_available = False
+            print("Audio control initialized successfully")
+        except ImportError as e:
+            print(f"pycaw not available - audio control disabled: {e}")
+            print("Install with: pip install pycaw comtypes")
+        except Exception as e:
+            print(f"Error initializing audio: {e}")
     
     def get_audio_session_for_pid(self, pid):
         """Get audio session for a specific process ID"""
@@ -117,81 +110,87 @@ class WindowManager:
                 if session.Process and session.Process.pid == pid:
                     return session
         except Exception as e:
-            print(f"Error getting audio session: {e}")
+            pass
         return None
     
     def get_app_volume(self, pid):
         """Get volume level for an app (0.0 to 1.0)"""
+        if not self.audio_available:
+            return None
         session = self.get_audio_session_for_pid(pid)
         if session:
             try:
-                volume = session._ctl.QueryInterface(self.ISimpleAudioVolume)
-                return volume.GetMasterVolume()
-            except:
+                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
+                return volume_interface.GetMasterVolume()
+            except Exception as e:
                 pass
         return None
     
     def set_app_volume(self, pid, level):
         """Set volume level for an app (0.0 to 1.0)"""
+        if not self.audio_available:
+            return False
         session = self.get_audio_session_for_pid(pid)
         if session:
             try:
-                volume = session._ctl.QueryInterface(self.ISimpleAudioVolume)
-                volume.SetMasterVolume(level, None)
+                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
+                volume_interface.SetMasterVolume(float(level), None)
                 return True
-            except:
+            except Exception as e:
                 pass
         return False
     
     def get_app_mute(self, pid):
         """Get mute state for an app"""
+        if not self.audio_available:
+            return None
         session = self.get_audio_session_for_pid(pid)
         if session:
             try:
-                volume = session._ctl.QueryInterface(self.ISimpleAudioVolume)
-                return volume.GetMute()
-            except:
+                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
+                return bool(volume_interface.GetMute())
+            except Exception as e:
                 pass
         return None
     
     def set_app_mute(self, pid, mute):
         """Set mute state for an app"""
+        if not self.audio_available:
+            return False
         session = self.get_audio_session_for_pid(pid)
         if session:
             try:
-                volume = session._ctl.QueryInterface(self.ISimpleAudioVolume)
-                volume.SetMute(mute, None)
+                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
+                volume_interface.SetMute(int(mute), None)
                 return True
-            except:
+            except Exception as e:
                 pass
         return False
     
     def get_system_volume(self):
         """Get system master volume (0.0 to 1.0)"""
+        if not self.audio_available:
+            return 1.0
         try:
-            from pycaw.pycaw import AudioUtilities
-            from pycaw.pycaw import IAudioEndpointVolume
-            from comtypes import CLSCTX_ALL
-            
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))
+            devices = self.AudioUtilities.GetSpeakers()
+            interface = devices.Activate(
+                self.IAudioEndpointVolume._iid_, self.CLSCTX_ALL, None)
+            volume = self.cast(interface, self.POINTER(self.IAudioEndpointVolume))
             return volume.GetMasterVolumeLevelScalar()
         except Exception as e:
             print(f"Error getting system volume: {e}")
-        return 0.5
+        return 1.0
     
     def set_system_volume(self, level):
         """Set system master volume (0.0 to 1.0)"""
+        if not self.audio_available:
+            return False
         try:
-            from pycaw.pycaw import AudioUtilities
-            from pycaw.pycaw import IAudioEndpointVolume
-            from comtypes import CLSCTX_ALL
-            
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))
-            volume.SetMasterVolumeLevelScalar(level, None)
+            devices = self.AudioUtilities.GetSpeakers()
+            interface = devices.Activate(
+                self.IAudioEndpointVolume._iid_, self.CLSCTX_ALL, None)
+            volume = self.cast(interface, self.POINTER(self.IAudioEndpointVolume))
+            volume.SetMasterVolumeLevelScalar(float(level), None)
             return True
         except Exception as e:
             print(f"Error setting system volume: {e}")
@@ -199,32 +198,30 @@ class WindowManager:
     
     def get_system_mute(self):
         """Get system mute state"""
+        if not self.audio_available:
+            return False
         try:
-            from pycaw.pycaw import AudioUtilities
-            from pycaw.pycaw import IAudioEndpointVolume
-            from comtypes import CLSCTX_ALL
-            
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))
-            return volume.GetMute()
-        except:
+            devices = self.AudioUtilities.GetSpeakers()
+            interface = devices.Activate(
+                self.IAudioEndpointVolume._iid_, self.CLSCTX_ALL, None)
+            volume = self.cast(interface, self.POINTER(self.IAudioEndpointVolume))
+            return bool(volume.GetMute())
+        except Exception as e:
             pass
         return False
     
     def set_system_mute(self, mute):
         """Set system mute state"""
+        if not self.audio_available:
+            return False
         try:
-            from pycaw.pycaw import AudioUtilities
-            from pycaw.pycaw import IAudioEndpointVolume
-            from comtypes import CLSCTX_ALL
-            
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            volume = cast(interface, POINTER(IAudioEndpointVolume))
-            volume.SetMute(1 if mute else 0, None)
+            devices = self.AudioUtilities.GetSpeakers()
+            interface = devices.Activate(
+                self.IAudioEndpointVolume._iid_, self.CLSCTX_ALL, None)
+            volume = self.cast(interface, self.POINTER(self.IAudioEndpointVolume))
+            volume.SetMute(int(mute), None)
             return True
-        except:
+        except Exception as e:
             pass
         return False
     
@@ -237,15 +234,11 @@ class WindowManager:
     
     def ensure_topmost_during_action(self):
         """Temporarily ensure window is on top during an action"""
-        # Store current pin state
         was_pinned = self.pin_to_top.get()
-        
-        # Force to top
         self.root.attributes('-topmost', True)
         self.root.lift()
         self.root.update_idletasks()
         
-        # If not pinned, schedule restore
         if not was_pinned:
             if hasattr(self, '_restore_job') and self._restore_job:
                 self.root.after_cancel(self._restore_job)
@@ -271,11 +264,9 @@ class WindowManager:
         style = ttk.Style()
         style.theme_use('clam')
         
-        # Frame styles
         style.configure('TFrame', background=self.colors['bg'])
         style.configure('Card.TFrame', background=self.colors['card'])
         
-        # Label styles
         style.configure('TLabel', 
                        background=self.colors['bg'], 
                        foreground=self.colors['fg'],
@@ -289,7 +280,6 @@ class WindowManager:
         style.configure('Card.TLabel',
                        background=self.colors['card'])
         
-        # Button styles
         style.configure('TButton',
                        padding=(12, 6),
                        font=('Segoe UI', 9),
@@ -308,7 +298,6 @@ class WindowManager:
                        padding=(6, 3),
                        font=('Segoe UI', 8))
         
-        # Checkbutton styles
         style.configure('TCheckbutton',
                        background=self.colors['bg'],
                        foreground=self.colors['fg'],
@@ -320,18 +309,15 @@ class WindowManager:
         style.map('Card.TCheckbutton',
                  background=[('active', self.colors['card'])])
         
-        # Combobox styles
         style.configure('TCombobox',
                        padding=5,
                        font=('Segoe UI', 9))
         
-        # Separator
         style.configure('TSeparator', background=self.colors['border'])
         
     def get_monitors(self):
         """Get all connected monitors with their info"""
         monitors = []
-        
         monitors_enum = win32api.EnumDisplayMonitors(None, None)
         
         for hMonitor, hdcMonitor, pyRect in monitors_enum:
@@ -384,13 +370,11 @@ class WindowManager:
         title_label = ttk.Label(header_frame, text="Window Manager", style='Title.TLabel')
         title_label.pack(side=tk.LEFT)
         
-        # Pin to top checkbox
         pin_cb = ttk.Checkbutton(header_frame, text="📌 Pin", 
                                   variable=self.pin_to_top,
                                   command=self.toggle_pin)
         pin_cb.pack(side=tk.RIGHT)
         
-        # Refresh button
         refresh_btn = ttk.Button(header_frame, text="↻", width=3,
                                   command=self.refresh_windows, style='Small.TButton')
         refresh_btn.pack(side=tk.RIGHT, padx=(0, 10))
@@ -426,10 +410,9 @@ class WindowManager:
         self.selection_label = ttk.Label(split_frame, text="0 selected", style='Muted.TLabel')
         self.selection_label.pack(side=tk.RIGHT)
         
-        # Separator
         ttk.Separator(main_frame, orient='horizontal').pack(fill=tk.X, pady=10)
         
-        # Selection controls - minimal row
+        # Selection controls
         select_frame = ttk.Frame(main_frame)
         select_frame.pack(fill=tk.X, pady=(0, 10))
         
@@ -442,7 +425,6 @@ class WindowManager:
         ttk.Button(select_frame, text="Monitor", width=7, style='Small.TButton',
                    command=self.select_monitor).pack(side=tk.LEFT, padx=2)
         
-        # Separator
         ttk.Separator(main_frame, orient='horizontal').pack(fill=tk.X, pady=10)
         
         # Audio bulk controls
@@ -451,7 +433,6 @@ class WindowManager:
         
         ttk.Label(audio_frame, text="Audio:", style='Muted.TLabel').pack(side=tk.LEFT)
         
-        # Mute/Unmute buttons for bulk operations
         self.bulk_mute_btn = tk.Button(audio_frame, text="🔇 Mute", 
                                         bg=self.colors['card'], fg=self.colors['fg'],
                                         font=('Segoe UI', 9), bd=0, padx=10, pady=4,
@@ -466,15 +447,15 @@ class WindowManager:
                                           command=self.bulk_unmute)
         self.bulk_unmute_btn.pack(side=tk.LEFT, padx=(0, 4))
         
-        # Volume button with right-click for slider
+        # Volume button with right-click-hold for slider
         self.bulk_volume_btn = tk.Button(audio_frame, text="🎚️ Vol",
                                           bg=self.colors['card'], fg=self.colors['fg'],
                                           font=('Segoe UI', 9), bd=0, padx=10, pady=4,
                                           activebackground=self.colors['card_hover'])
         self.bulk_volume_btn.pack(side=tk.LEFT)
-        self.bulk_volume_btn.bind('<Button-3>', self.show_bulk_volume_slider)
+        self.bulk_volume_btn.bind('<ButtonPress-3>', self.on_bulk_volume_press)
+        self.bulk_volume_btn.bind('<ButtonRelease-3>', self.on_volume_release)
         
-        # Separator
         ttk.Separator(main_frame, orient='horizontal').pack(fill=tk.X, pady=10)
         
         # Windows list
@@ -499,7 +480,6 @@ class WindowManager:
         scrollbar.pack(side="right", fill="y")
         
         self.canvas.bind('<Configure>', self.on_canvas_configure)
-        
         self.canvas.bind_all("<MouseWheel>", 
                              lambda e: self.canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         
@@ -673,25 +653,20 @@ class WindowManager:
         """Create a sleek window card"""
         base_bg = self.colors['card_selected'] if was_selected else self.colors['card']
         
-        # Card frame
         card = tk.Frame(self.scrollable_frame, bg=base_bg, highlightthickness=0)
         card.pack(fill=tk.X, pady=2, padx=2)
         
-        # Inner padding frame
         inner = tk.Frame(card, bg=base_bg)
         inner.pack(fill=tk.X, padx=10, pady=8)
         
-        # Left side: indicator + checkbox + info
         left = tk.Frame(inner, bg=base_bg)
         left.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        # Selection indicator (colored bar)
         indicator_color = self.colors['checkbox_checked'] if was_selected else self.colors['checkbox_unchecked']
         indicator = tk.Frame(left, bg=indicator_color, width=4, height=32)
         indicator.pack(side=tk.LEFT, padx=(0, 8))
         indicator.pack_propagate(False)
         
-        # Checkbox
         var = tk.BooleanVar(value=was_selected)
         if was_selected:
             self.selected_windows[hwnd] = True
@@ -704,28 +679,23 @@ class WindowManager:
         
         self.window_checkboxes[hwnd] = var
         
-        # Info container
         info = tk.Frame(left, bg=base_bg)
         info.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
         
-        # Process name (bold)
         proc_label = tk.Label(info, text=process, bg=base_bg,
                               fg=self.colors['fg'], font=('Segoe UI', 9, 'bold'),
                               anchor='w')
         proc_label.pack(fill=tk.X)
         
-        # Window title (muted, truncated)
         display_title = title[:35] + "…" if len(title) > 35 else title
         title_label = tk.Label(info, text=display_title, bg=base_bg,
                                fg=self.colors['muted'], font=('Segoe UI', 8),
                                anchor='w')
         title_label.pack(fill=tk.X)
         
-        # Right side: action buttons
         actions = tk.Frame(inner, bg=base_bg)
         actions.pack(side=tk.RIGHT)
         
-        # Minimal icon buttons
         btn_style = {'bg': base_bg, 'fg': self.colors['muted'],
                      'font': ('Segoe UI', 10), 'bd': 0, 'padx': 6, 'pady': 2,
                      'activebackground': self.colors['card_hover'],
@@ -739,15 +709,15 @@ class WindowManager:
         minmax_btn = tk.Button(actions, text="□", command=lambda h=hwnd: self.toggle_minmax(h), **btn_style)
         minmax_btn.pack(side=tk.LEFT)
         
-        # Audio mute toggle button
+        # Audio mute toggle button with right-click-hold for slider
         is_muted = self.get_app_mute(pid) if pid else False
         audio_icon = "🔇" if is_muted else "🔊"
         audio_btn = tk.Button(actions, text=audio_icon, **btn_style)
         audio_btn.configure(command=lambda h=hwnd, p=pid, b=audio_btn: self.toggle_app_mute(h, p, b))
-        audio_btn.bind('<Button-3>', lambda e, h=hwnd, p=pid, b=audio_btn: self.show_app_volume_slider(e, h, p, b))
+        audio_btn.bind('<ButtonPress-3>', lambda e, h=hwnd, p=pid, b=audio_btn: self.on_app_volume_press(e, h, p, b))
+        audio_btn.bind('<ButtonRelease-3>', self.on_volume_release)
         audio_btn.pack(side=tk.LEFT)
         
-        # Store card references
         self.window_cards[hwnd] = {
             'card': card,
             'inner': inner,
@@ -758,7 +728,8 @@ class WindowManager:
             'indicator': indicator,
             'buttons': [focus_btn, minmax_btn, audio_btn],
             'audio_btn': audio_btn,
-            'base_bg': base_bg
+            'base_bg': base_bg,
+            'pid': pid
         }
         
         # Hover effects
@@ -825,8 +796,8 @@ class WindowManager:
         else:
             self.status_var.set("Failed to toggle mute")
     
-    def show_app_volume_slider(self, event, hwnd, pid, btn):
-        """Show volume slider for a specific app"""
+    def on_app_volume_press(self, event, hwnd, pid, btn):
+        """Handle right-click press on app audio button - show slider"""
         if not pid or not self.audio_available:
             self.status_var.set("No audio session for this window")
             return
@@ -836,41 +807,44 @@ class WindowManager:
             self.status_var.set("No audio session for this window")
             return
         
-        self.create_volume_slider(event, current_volume, 
-                                   lambda v: self.set_app_volume(pid, v),
-                                   lambda: self.update_audio_btn(hwnd, pid, btn))
+        def on_change(v):
+            self.set_app_volume(pid, v)
+        
+        def on_close():
+            self.update_audio_btn(hwnd, pid, btn)
+        
+        self.show_volume_slider(event, current_volume, on_change, on_close, "App Volume")
     
-    def show_bulk_volume_slider(self, event):
-        """Show volume slider for bulk operation or system volume"""
+    def on_bulk_volume_press(self, event):
+        """Handle right-click press on bulk volume button"""
         selected = self.get_selected_windows()
         
         if not selected:
             # No selection - control system volume
             current_volume = self.get_system_volume()
-            self.create_volume_slider(event, current_volume,
-                                       lambda v: self.set_system_volume(v),
-                                       None, "System Volume")
-        else:
-            # Control selected windows
-            # Get average volume of selected windows
-            volumes = []
-            for hwnd in selected:
-                pid = self.window_pids.get(hwnd)
-                if pid:
-                    vol = self.get_app_volume(pid)
-                    if vol is not None:
-                        volumes.append(vol)
             
-            current_volume = sum(volumes) / len(volumes) if volumes else 0.5
-            self.create_volume_slider(event, current_volume,
-                                       lambda v: self.set_selected_volumes(v),
-                                       self.update_all_audio_btns, f"{len(selected)} Windows")
+            def on_change(v):
+                self.set_system_volume(v)
+            
+            self.show_volume_slider(event, current_volume, on_change, None, "System")
+        else:
+            # Control selected windows - start at 100%
+            def on_change(v):
+                self.set_selected_volumes(v)
+            
+            def on_close():
+                self.update_all_audio_btns()
+            
+            self.show_volume_slider(event, 1.0, on_change, on_close, f"{len(selected)} Apps")
     
-    def create_volume_slider(self, event, initial_volume, on_change, on_release=None, title="Volume"):
-        """Create a floating volume slider window"""
+    def on_volume_release(self, event):
+        """Handle right-click release - close slider"""
+        self.close_volume_slider()
+    
+    def show_volume_slider(self, event, initial_volume, on_change, on_close=None, title="Volume"):
+        """Create a floating volume slider window that stays open while right-click is held"""
         # Close any existing slider
-        if self.volume_slider_window:
-            self.volume_slider_window.destroy()
+        self.close_volume_slider()
         
         # Create popup window
         slider_win = tk.Toplevel(self.root)
@@ -878,17 +852,20 @@ class WindowManager:
         slider_win.attributes('-topmost', True)
         
         # Calculate position near the button
-        x = event.x_root - 20
-        y = event.y_root + 10
+        x = event.x_root - 25
+        y = event.y_root - 180  # Position above the button
         
-        # Slider height is approximately twice a card height (80-100 pixels)
+        # Slider height is approximately twice a card height
         slider_height = 160
         slider_width = 50
         
         slider_win.geometry(f"{slider_width}x{slider_height}+{x}+{y}")
         slider_win.configure(bg=self.colors['card'])
         
+        # Store reference and callbacks
         self.volume_slider_window = slider_win
+        self.volume_slider_on_close = on_close
+        self.volume_slider_on_change = on_change
         
         # Title label
         title_lbl = tk.Label(slider_win, text=title, bg=self.colors['card'],
@@ -896,112 +873,111 @@ class WindowManager:
         title_lbl.pack(pady=(5, 0))
         
         # Volume percentage label
-        vol_var = tk.StringVar(value=f"{int(initial_volume * 100)}%")
-        vol_label = tk.Label(slider_win, textvariable=vol_var, bg=self.colors['card'],
+        self.vol_var = tk.StringVar(value=f"{int(initial_volume * 100)}%")
+        vol_label = tk.Label(slider_win, textvariable=self.vol_var, bg=self.colors['card'],
                              fg=self.colors['fg'], font=('Segoe UI', 9, 'bold'))
         vol_label.pack(pady=(2, 5))
         
         # Create canvas for custom slider
         canvas_height = slider_height - 60
-        canvas = tk.Canvas(slider_win, width=30, height=canvas_height,
-                           bg=self.colors['slider_bg'], highlightthickness=0)
-        canvas.pack(pady=(0, 5))
+        self.slider_canvas = tk.Canvas(slider_win, width=30, height=canvas_height,
+                                        bg=self.colors['slider_bg'], highlightthickness=0)
+        self.slider_canvas.pack(pady=(0, 5))
         
-        # Draw slider track
-        track_x = 15
-        track_top = 5
-        track_bottom = canvas_height - 5
-        track_height = track_bottom - track_top
+        # Slider parameters
+        self.track_x = 15
+        self.track_top = 5
+        self.track_bottom = canvas_height - 5
+        self.track_height = self.track_bottom - self.track_top
         
         # Track background
-        canvas.create_rectangle(track_x - 3, track_top, track_x + 3, track_bottom,
-                                fill=self.colors['slider_bg'], outline=self.colors['border'])
+        self.slider_canvas.create_rectangle(self.track_x - 3, self.track_top, 
+                                             self.track_x + 3, self.track_bottom,
+                                             fill=self.colors['slider_bg'], 
+                                             outline=self.colors['border'])
         
-        # Calculate initial handle position
-        handle_y = track_bottom - (initial_volume * track_height)
+        # Calculate initial handle position based on actual volume
+        handle_y = self.track_bottom - (initial_volume * self.track_height)
         
         # Filled portion
-        fill_rect = canvas.create_rectangle(track_x - 3, handle_y, track_x + 3, track_bottom,
-                                            fill=self.colors['slider_fg'], outline='')
+        self.fill_rect = self.slider_canvas.create_rectangle(
+            self.track_x - 3, handle_y, self.track_x + 3, self.track_bottom,
+            fill=self.colors['slider_fg'], outline='')
         
         # Handle
-        handle = canvas.create_oval(track_x - 8, handle_y - 8, track_x + 8, handle_y + 8,
-                                    fill=self.colors['accent'], outline=self.colors['fg'])
+        self.handle = self.slider_canvas.create_oval(
+            self.track_x - 8, handle_y - 8, self.track_x + 8, handle_y + 8,
+            fill=self.colors['accent'], outline=self.colors['fg'])
         
-        # Dragging state
-        dragging = {'active': False}
+        # Bind motion events to root for tracking mouse while right-click held
+        self.root.bind('<Motion>', self.on_slider_motion)
+        slider_win.bind('<Motion>', self.on_slider_motion)
+    
+    def on_slider_motion(self, event):
+        """Handle mouse motion while slider is open"""
+        if not self.volume_slider_window or not self.slider_canvas:
+            return
         
-        def update_slider(y_pos):
-            # Clamp y position
-            y_pos = max(track_top, min(track_bottom, y_pos))
+        try:
+            # Get mouse position relative to canvas
+            canvas_x = self.slider_canvas.winfo_rootx()
+            canvas_y = self.slider_canvas.winfo_rooty()
+            
+            # Calculate y position relative to canvas
+            y_pos = event.y_root - canvas_y
+            
+            # Clamp y position to track bounds
+            y_pos = max(self.track_top, min(self.track_bottom, y_pos))
             
             # Calculate volume (inverted - top is high, bottom is low)
-            volume = (track_bottom - y_pos) / track_height
+            volume = (self.track_bottom - y_pos) / self.track_height
             volume = max(0.0, min(1.0, volume))
             
             # Update visual
-            canvas.coords(handle, track_x - 8, y_pos - 8, track_x + 8, y_pos + 8)
-            canvas.coords(fill_rect, track_x - 3, y_pos, track_x + 3, track_bottom)
+            self.slider_canvas.coords(self.handle, 
+                                       self.track_x - 8, y_pos - 8, 
+                                       self.track_x + 8, y_pos + 8)
+            self.slider_canvas.coords(self.fill_rect, 
+                                       self.track_x - 3, y_pos, 
+                                       self.track_x + 3, self.track_bottom)
             
             # Update label
-            vol_var.set(f"{int(volume * 100)}%")
+            self.vol_var.set(f"{int(volume * 100)}%")
             
             # Apply volume change
-            if on_change:
-                on_change(volume)
+            if self.volume_slider_on_change:
+                self.volume_slider_on_change(volume)
+                
+        except Exception as e:
+            pass
+    
+    def close_volume_slider(self):
+        """Close the volume slider"""
+        # Unbind motion event
+        try:
+            self.root.unbind('<Motion>')
+        except:
+            pass
         
-        def on_press(e):
-            dragging['active'] = True
-            update_slider(e.y)
-        
-        def on_drag(e):
-            if dragging['active']:
-                update_slider(e.y)
-        
-        def on_release(e):
-            dragging['active'] = False
-            if on_release:
-                on_release()
-        
-        canvas.bind('<Button-1>', on_press)
-        canvas.bind('<B1-Motion>', on_drag)
-        canvas.bind('<ButtonRelease-1>', on_release)
-        
-        # Start dragging immediately from current position
-        # Simulate initial press at handle position
-        dragging['active'] = True
-        
-        # Close when clicking outside
-        def close_on_outside(e):
-            # Check if click is outside the slider window
+        # Call on_close callback if set
+        if hasattr(self, 'volume_slider_on_close') and self.volume_slider_on_close:
             try:
-                if slider_win.winfo_exists():
-                    x, y = e.x_root, e.y_root
-                    wx = slider_win.winfo_rootx()
-                    wy = slider_win.winfo_rooty()
-                    ww = slider_win.winfo_width()
-                    wh = slider_win.winfo_height()
-                    
-                    if not (wx <= x <= wx + ww and wy <= y <= wy + wh):
-                        if on_release:
-                            on_release()
-                        slider_win.destroy()
-                        self.volume_slider_window = None
+                self.volume_slider_on_close()
             except:
                 pass
+            self.volume_slider_on_close = None
         
-        # Bind to root window
-        self.root.bind('<Button-1>', close_on_outside, add='+')
-        
-        # Also close on escape
-        def close_on_escape(e):
-            if on_release:
-                on_release()
-            slider_win.destroy()
+        # Destroy slider window
+        if self.volume_slider_window:
+            try:
+                self.volume_slider_window.destroy()
+            except:
+                pass
             self.volume_slider_window = None
         
-        slider_win.bind('<Escape>', close_on_escape)
-        slider_win.focus_set()
+        # Clear references
+        self.slider_canvas = None
+        self.volume_slider_on_change = None
     
     def update_audio_btn(self, hwnd, pid, btn):
         """Update audio button icon based on mute state"""
@@ -1013,7 +989,7 @@ class WindowManager:
     def update_all_audio_btns(self):
         """Update all audio button icons"""
         for hwnd, card_data in self.window_cards.items():
-            pid = self.window_pids.get(hwnd)
+            pid = card_data.get('pid')
             if pid:
                 is_muted = self.get_app_mute(pid)
                 if is_muted is not None:
@@ -1032,7 +1008,6 @@ class WindowManager:
         selected = self.get_selected_windows()
         
         if not selected:
-            # Mute system
             if self.set_system_mute(True):
                 self.status_var.set("System muted")
             return
@@ -1042,7 +1017,6 @@ class WindowManager:
             pid = self.window_pids.get(hwnd)
             if pid and self.set_app_mute(pid, True):
                 count += 1
-                # Update button
                 if hwnd in self.window_cards:
                     self.window_cards[hwnd]['audio_btn'].configure(text="🔇")
         
@@ -1053,7 +1027,6 @@ class WindowManager:
         selected = self.get_selected_windows()
         
         if not selected:
-            # Unmute system
             if self.set_system_mute(False):
                 self.status_var.set("System unmuted")
             return
@@ -1063,7 +1036,6 @@ class WindowManager:
             pid = self.window_pids.get(hwnd)
             if pid and self.set_app_mute(pid, False):
                 count += 1
-                # Update button
                 if hwnd in self.window_cards:
                     self.window_cards[hwnd]['audio_btn'].configure(text="🔊")
         
@@ -1251,12 +1223,12 @@ def main():
         print("pip install pywin32 psutil")
         return
     
-    # Check for pycaw (optional but recommended)
     try:
         import pycaw
+        print("pycaw found - audio control enabled")
     except ImportError:
         print("Note: pycaw not installed. Audio control will be limited.")
-        print("Install with: pip install pycaw")
+        print("Install with: pip install pycaw comtypes")
         
     app = WindowManager()
     app.run()

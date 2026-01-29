@@ -1,3 +1,4 @@
+
 # Windows Context Manager
 
 A lightweight Windows utility for managing windows, monitors, and per-app audio control.

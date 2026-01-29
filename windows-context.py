@@ -10,6 +10,7 @@ import psutil
 import os
 import time
 import traceback
+import atexit
 from collections import OrderedDict
 
 # Windows API constants
@@ -73,14 +74,13 @@ class WindowManager:
         self.volume_slider_window = None
         self.slider_start_y = None
         self.slider_start_volume = None
+        self.current_slider_volume = None
+        self.volume_slider_on_change = None
+        self.volume_slider_on_close = None
+        self.slider_canvas = None
         
         # Get monitors
         self.monitors = self.get_monitors()
-        
-        # Audio session cache - maps PID to session
-        self.audio_session_cache = {}
-        self.audio_session_cache_time = 0
-        self.CACHE_DURATION = 2.0  # Refresh cache every 2 seconds
         
         # Initialize audio
         self.init_audio()
@@ -88,6 +88,22 @@ class WindowManager:
         self.setup_styles()
         self.setup_ui()
         self.refresh_windows()
+        
+        # Register cleanup on exit
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        atexit.register(self.export_debug_log_on_exit)
+    
+    def on_closing(self):
+        """Handle window close - export debug log if debug mode was used"""
+        if self.debug_log:  # Only export if there's something to log
+            self.log_debug("Application closing")
+            self.export_debug_log()
+        self.root.destroy()
+    
+    def export_debug_log_on_exit(self):
+        """Export debug log on exit (via atexit)"""
+        # This is a backup in case on_closing isn't called
+        pass
     
     def log_debug(self, message, level="INFO"):
         """Add a message to the debug log"""
@@ -105,6 +121,9 @@ class WindowManager:
     
     def export_debug_log(self):
         """Export debug log to a file"""
+        if not self.debug_log:
+            return None
+            
         # Create debug directory if it doesn't exist
         if not os.path.exists(self.debug_dir):
             os.makedirs(self.debug_dir)
@@ -117,27 +136,31 @@ class WindowManager:
         system_info = self.gather_system_info()
         
         # Write log file
-        with open(filename, 'w', encoding='utf-8') as f:
-            f.write("=" * 60 + "\n")
-            f.write("WINDOW MANAGER DEBUG LOG\n")
-            f.write(f"Exported: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write(f"Unix Timestamp: {unix_time}\n")
-            f.write("=" * 60 + "\n\n")
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write("=" * 60 + "\n")
+                f.write("WINDOW MANAGER DEBUG LOG\n")
+                f.write(f"Exported: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(f"Unix Timestamp: {unix_time}\n")
+                f.write("=" * 60 + "\n\n")
+                
+                f.write("SYSTEM INFORMATION\n")
+                f.write("-" * 40 + "\n")
+                for key, value in system_info.items():
+                    f.write(f"{key}: {value}\n")
+                f.write("\n")
+                
+                f.write("DEBUG LOG\n")
+                f.write("-" * 40 + "\n")
+                for entry in self.debug_log:
+                    f.write(entry + "\n")
             
-            f.write("SYSTEM INFORMATION\n")
-            f.write("-" * 40 + "\n")
-            for key, value in system_info.items():
-                f.write(f"{key}: {value}\n")
-            f.write("\n")
-            
-            f.write("DEBUG LOG\n")
-            f.write("-" * 40 + "\n")
-            for entry in self.debug_log:
-                f.write(entry + "\n")
-        
-        self.status_var.set(f"Debug log exported: {filename}")
-        self.log_debug(f"Debug log exported to {filename}")
-        return filename
+            if hasattr(self, 'status_var'):
+                self.status_var.set(f"Debug log exported: {filename}")
+            return filename
+        except Exception as e:
+            print(f"Failed to export debug log: {e}")
+            return None
     
     def gather_system_info(self):
         """Gather system information for debugging"""
@@ -182,7 +205,7 @@ class WindowManager:
         info["Audio Available"] = self.audio_available
         info["Volume Interface Type"] = str(type(self.volume_interface)) if self.volume_interface else "None"
         
-        # Dump audio session info for debugging
+        # Get fresh audio session info for debugging
         if self.AudioUtilities:
             try:
                 sessions = self.AudioUtilities.GetAllSessions()
@@ -192,7 +215,6 @@ class WindowManager:
                     if proc:
                         info[f"Session {i}"] = f"PID={proc.pid}, Name={proc.name()}"
                     else:
-                        # Try to get identifier
                         try:
                             ctl = session._ctl
                             if hasattr(ctl, 'GetDisplayName'):
@@ -249,24 +271,20 @@ class WindowManager:
                 self.log_debug("GetSpeakers() returned None", "ERROR")
                 return
             
-            # NEW PYCAW API: AudioDevice has EndpointVolume as a property
+            # Try EndpointVolume property (new pycaw API)
             if hasattr(speakers, 'EndpointVolume'):
                 self.log_debug("Found EndpointVolume property (new pycaw API)")
                 try:
                     self.volume_interface = speakers.EndpointVolume
-                    
-                    # Test if it works
                     test_vol = self.volume_interface.GetMasterVolumeLevelScalar()
                     self.log_debug(f"Test read volume: {test_vol}")
-                    
                     self.audio_available = True
                     self.log_debug("Audio initialized via EndpointVolume property", "SUCCESS")
                     return
                 except Exception as e:
                     self.log_debug(f"EndpointVolume property failed: {e}", "ERROR")
-                    self.log_debug(traceback.format_exc(), "ERROR")
             
-            # Try _volume attribute (another variant)
+            # Try _volume attribute
             if hasattr(speakers, '_volume'):
                 self.log_debug("Found _volume attribute")
                 try:
@@ -296,98 +314,56 @@ class WindowManager:
                 except Exception as e:
                     self.log_debug(f"Activate() failed: {e}", "ERROR")
             
-            # Try accessing through _dev
-            if hasattr(speakers, '_dev'):
-                self.log_debug("Trying _dev attribute")
-                try:
-                    dev = speakers._dev
-                    
-                    if hasattr(dev, 'Activate'):
-                        from comtypes import CLSCTX_ALL
-                        from ctypes import cast, POINTER
-                        from pycaw.pycaw import IAudioEndpointVolume
-                        
-                        interface = dev.Activate(
-                            IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                        self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
-                        
-                        test_vol = self.volume_interface.GetMasterVolumeLevelScalar()
-                        self.log_debug(f"Test volume via _dev: {test_vol}")
-                        
-                        self.audio_available = True
-                        self.log_debug("Audio initialized via _dev.Activate()", "SUCCESS")
-                        return
-                except Exception as e:
-                    self.log_debug(f"_dev approach failed: {e}", "ERROR")
-                    self.log_debug(traceback.format_exc(), "ERROR")
-            
             self.log_debug("All audio initialization methods exhausted", "ERROR")
             
         except ImportError as e:
             self.log_debug(f"Import error: {e}", "ERROR")
-            self.log_debug(traceback.format_exc(), "ERROR")
         except Exception as e:
             self.log_debug(f"Unexpected error initializing audio: {e}", "ERROR")
-            self.log_debug(traceback.format_exc(), "ERROR")
     
-    def refresh_audio_session_cache(self):
-        """Refresh the audio session cache"""
-        current_time = time.time()
-        if current_time - self.audio_session_cache_time < self.CACHE_DURATION:
-            return  # Cache is still fresh
-        
-        self.audio_session_cache.clear()
-        self.audio_session_cache_time = current_time
-        
+    def get_fresh_audio_sessions(self):
+        """Get fresh audio sessions - don't cache COM objects"""
         if not self.AudioUtilities:
-            return
+            return {}
         
+        sessions_by_pid = {}
         try:
             sessions = self.AudioUtilities.GetAllSessions()
             if not sessions:
-                self.log_debug("No audio sessions found")
-                return
+                return {}
             
-            session_info = []
             for session in sessions:
                 proc = session.Process
                 if proc:
-                    pid = proc.pid
-                    self.audio_session_cache[pid] = session
-                    session_info.append(f"{proc.name()}(PID:{pid})")
-                else:
-                    # Try to handle sessions without Process
-                    # Some apps use a different process for audio
-                    session_info.append("(no process)")
-            
-            self.log_debug(f"Audio sessions: {', '.join(session_info)}")
-            
+                    sessions_by_pid[proc.pid] = session
         except Exception as e:
-            self.log_debug(f"Error refreshing audio cache: {e}", "ERROR")
+            self.log_debug(f"Error getting audio sessions: {e}", "ERROR")
+        
+        return sessions_by_pid
     
     def get_audio_session_for_pid(self, pid):
-        """Get audio session for a specific process ID"""
+        """Get audio session for a specific process ID - always fetch fresh"""
         if not self.AudioUtilities or not pid:
             return None
         
-        self.refresh_audio_session_cache()
+        sessions = self.get_fresh_audio_sessions()
         
         # Direct PID match
-        if pid in self.audio_session_cache:
-            return self.audio_session_cache[pid]
+        if pid in sessions:
+            return sessions[pid]
         
         # Try to find by process tree (child processes)
         try:
             proc = psutil.Process(pid)
             # Check parent
             parent = proc.parent()
-            if parent and parent.pid in self.audio_session_cache:
-                return self.audio_session_cache[parent.pid]
+            if parent and parent.pid in sessions:
+                return sessions[parent.pid]
             
             # Check children
             for child in proc.children(recursive=True):
-                if child.pid in self.audio_session_cache:
-                    return self.audio_session_cache[child.pid]
+                if child.pid in sessions:
+                    return sessions[child.pid]
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
         
@@ -910,9 +886,20 @@ class WindowManager:
         
         self.monitors = self.get_monitors()
         
-        # Force refresh audio session cache
-        self.audio_session_cache_time = 0
-        self.refresh_audio_session_cache()
+        # Get current audio sessions for display
+        audio_sessions = self.get_fresh_audio_sessions()
+        audio_pids = set(audio_sessions.keys())
+        
+        session_names = []
+        for pid, session in audio_sessions.items():
+            try:
+                proc = session.Process
+                if proc:
+                    session_names.append(f"{proc.name()}(PID:{pid})")
+            except:
+                pass
+        if session_names:
+            self.log_debug(f"Audio sessions: {', '.join(session_names)}")
         
         def enum_callback(hwnd, windows):
             if self.is_real_window(hwnd):
@@ -931,7 +918,8 @@ class WindowManager:
         
         for i, (hwnd, title, process, pid) in enumerate(windows):
             self.window_pids[hwnd] = pid
-            self.create_window_card(hwnd, title, process, pid, hwnd in old_selection)
+            has_audio = pid in audio_pids
+            self.create_window_card(hwnd, title, process, pid, hwnd in old_selection, has_audio)
                 
         self.update_selection_label()
         self.status_var.set(f"{len(windows)} windows")
@@ -970,7 +958,7 @@ class WindowManager:
         
         card_data['base_bg'] = bg_color
         
-    def create_window_card(self, hwnd, title, process, pid, was_selected=False):
+    def create_window_card(self, hwnd, title, process, pid, was_selected=False, has_audio=False):
         """Create a sleek window card"""
         base_bg = self.colors['card_selected'] if was_selected else self.colors['card']
         
@@ -1003,8 +991,7 @@ class WindowManager:
         info = tk.Frame(left, bg=base_bg)
         info.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
         
-        # Check if this app has an audio session
-        has_audio = pid in self.audio_session_cache
+        # Audio indicator
         audio_indicator = " 🔊" if has_audio else ""
         
         proc_label = tk.Label(info, text=process + audio_indicator, bg=base_bg,
@@ -1035,7 +1022,7 @@ class WindowManager:
         minmax_btn.pack(side=tk.LEFT)
         
         # Audio mute toggle button with right-click-hold for slider
-        is_muted = self.get_app_mute(pid) if pid else False
+        is_muted = self.get_app_mute(pid) if pid and has_audio else False
         audio_icon = "🔇" if is_muted else "🔊"
         audio_btn = tk.Button(actions, text=audio_icon, **btn_style)
         audio_btn.configure(command=lambda h=hwnd, p=pid, b=audio_btn: self.toggle_app_mute(h, p, b))
@@ -1054,7 +1041,8 @@ class WindowManager:
             'buttons': [focus_btn, minmax_btn, audio_btn],
             'audio_btn': audio_btn,
             'base_bg': base_bg,
-            'pid': pid
+            'pid': pid,
+            'has_audio': has_audio
         }
         
         # Hover effects
@@ -1260,9 +1248,9 @@ class WindowManager:
         # Sensitivity: pixels of mouse movement for full volume range
         self.slider_sensitivity = 150  # 150 pixels = 0% to 100%
         
-        # Bind mouse motion to root window for tracking
-        self.root.bind('<B3-Motion>', self.on_slider_motion)
-        slider_win.bind('<B3-Motion>', self.on_slider_motion)
+        # Bind mouse motion globally for tracking during right-click hold
+        self.root.bind('<Motion>', self.on_slider_motion)
+        slider_win.bind('<Motion>', self.on_slider_motion)
     
     def on_slider_motion(self, event):
         """Handle mouse motion while slider is open - relative movement"""
@@ -1303,7 +1291,7 @@ class WindowManager:
             # Update label
             self.vol_var.set(f"{int(new_volume * 100)}%")
             
-            # Apply volume change (no logging here - too verbose)
+            # Apply volume change
             if self.volume_slider_on_change:
                 self.volume_slider_on_change(new_volume)
                 
@@ -1314,7 +1302,7 @@ class WindowManager:
         """Close the volume slider"""
         # Unbind motion event
         try:
-            self.root.unbind('<B3-Motion>')
+            self.root.unbind('<Motion>')
         except:
             pass
         
@@ -1322,7 +1310,7 @@ class WindowManager:
         final_volume = self.current_slider_volume if self.current_slider_volume is not None else 1.0
         
         # Call on_close callback if set (with final volume)
-        if hasattr(self, 'volume_slider_on_close') and self.volume_slider_on_close:
+        if self.volume_slider_on_close:
             try:
                 self.volume_slider_on_close(final_volume)
             except:

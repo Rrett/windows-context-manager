@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 import ctypes
-from ctypes import wintypes, cast, POINTER, byref
+from ctypes import wintypes, cast, POINTER, byref, pointer
 import win32gui
 import win32con
 import win32process
@@ -257,6 +257,7 @@ class WindowManager:
         info["Audio Available"] = self.audio_available
         info["Volume Interface Type"] = str(type(self.volume_interface)) if self.volume_interface else "None"
         info["Render Device Count"] = len(self.render_devices)
+        info["Render Devices"] = ", ".join([d.get('name', 'Unknown') for d in self.render_devices])
         info["Monitored Devices"] = str(self.monitored_devices)
         info["Verbose Logging"] = self.verbose_logging
         
@@ -279,9 +280,9 @@ class WindowManager:
             
             self.enforce_audio_states()
             
-            self.root.after(1000, monitor)
+            self.root.after(500, monitor)  # Check every 500ms instead of 1000ms
         
-        self.root.after(2000, monitor)
+        self.root.after(1000, monitor)
     
     def enforce_audio_states(self):
         """Enforce mute/volume states on all sessions for tracked PIDs"""
@@ -293,21 +294,47 @@ class WindowManager:
             return
         
         try:
-            # Get all current sessions
+            # Get all current sessions - fresh lookup each time
             all_sessions = self._get_all_sessions_directly()
             
+            # Enforce mute states
             for pid in list(self.muted_pids):
                 if pid in all_sessions:
                     for sess_info in all_sessions[pid]:
-                        self._set_session_mute(sess_info, True)
+                        try:
+                            # Check current state and only set if different
+                            current_mute = self._get_session_mute(sess_info)
+                            if current_mute is not True:
+                                self._set_session_mute(sess_info, True)
+                                self.log_verbose(f"Enforced mute on PID {pid} @ {sess_info.get('device_name', 'unknown')}")
+                        except:
+                            pass
             
+            # Enforce volume levels
             for pid, level in list(self.volume_levels.items()):
                 if pid in all_sessions:
                     for sess_info in all_sessions[pid]:
-                        self._set_session_volume(sess_info, level)
+                        try:
+                            self._set_session_volume(sess_info, level)
+                        except:
+                            pass
                         
         except Exception as e:
             self.log_verbose(f"Error in audio enforcement: {e}", "WARNING")
+    
+    def _get_session_mute(self, session_info):
+        """Get mute state from a session info dict"""
+        try:
+            if 'volume' in session_info and session_info['volume']:
+                return bool(session_info['volume'].GetMute())
+            
+            if 'session' in session_info:
+                session = session_info['session']
+                if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
+                    return bool(session.SimpleAudioVolume.GetMute())
+        except:
+            pass
+        return None
     
     def _update_audio_btn_for_pid(self, pid, is_muted):
         """Update audio button icon for a specific PID"""
@@ -446,23 +473,38 @@ class WindowManager:
         self.render_devices = []
         
         try:
-            from comtypes import CLSCTX_ALL, CoCreateInstance, GUID, COMMETHOD, HRESULT
-            from ctypes import POINTER as CPOINTER, c_uint, c_void_p, c_wchar_p, Structure, windll
-            from ctypes.wintypes import DWORD, LPWSTR
+            from comtypes import CLSCTX_ALL, CoCreateInstance, GUID
+            from ctypes import Structure, c_ulong, byref as ctypes_byref
+            from ctypes.wintypes import DWORD
             
-            # Define property key structure
-            class PROPERTYKEY(Structure):
+            # PROPERTYKEY structure
+            class GUID_STRUCT(Structure):
                 _fields_ = [
-                    ('fmtid', ctypes.c_byte * 16),
-                    ('pid', DWORD),
+                    ("Data1", c_ulong),
+                    ("Data2", ctypes.c_ushort),
+                    ("Data3", ctypes.c_ushort),
+                    ("Data4", ctypes.c_ubyte * 8),
                 ]
             
-            # PKEY_Device_FriendlyName GUID: {a45c254e-df1c-4efd-8020-67d146a850e0}, 14
+            class PROPERTYKEY(Structure):
+                _fields_ = [
+                    ("fmtid", GUID_STRUCT),
+                    ("pid", DWORD),
+                ]
+            
+            # PKEY_Device_FriendlyName: {a45c254e-df1c-4efd-8020-67d146a850e0}, 14
             PKEY_Device_FriendlyName = PROPERTYKEY()
-            PKEY_Device_FriendlyName.fmtid = (ctypes.c_byte * 16)(
-                0x4e, 0x25, 0x5c, 0xa4, 0x1c, 0xdf, 0xfd, 0x4e,
-                0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0
-            )
+            PKEY_Device_FriendlyName.fmtid.Data1 = 0xa45c254e
+            PKEY_Device_FriendlyName.fmtid.Data2 = 0xdf1c
+            PKEY_Device_FriendlyName.fmtid.Data3 = 0x4efd
+            PKEY_Device_FriendlyName.fmtid.Data4[0] = 0x80
+            PKEY_Device_FriendlyName.fmtid.Data4[1] = 0x20
+            PKEY_Device_FriendlyName.fmtid.Data4[2] = 0x67
+            PKEY_Device_FriendlyName.fmtid.Data4[3] = 0xd1
+            PKEY_Device_FriendlyName.fmtid.Data4[4] = 0x46
+            PKEY_Device_FriendlyName.fmtid.Data4[5] = 0xa8
+            PKEY_Device_FriendlyName.fmtid.Data4[6] = 0x50
+            PKEY_Device_FriendlyName.fmtid.Data4[7] = 0xe0
             PKEY_Device_FriendlyName.pid = 14
             
             # MMDeviceEnumerator CLSID and IID
@@ -500,39 +542,55 @@ class WindowManager:
                     dev_id = device.GetId()
                     
                     # Get friendly name via property store
-                    name = f"Device {i}"
+                    name = f"Audio Device {i}"
                     try:
                         # STGM_READ = 0
                         props = device.OpenPropertyStore(0)
                         if props:
-                            # GetValue returns a PROPVARIANT-like object
                             try:
-                                # Try direct property access
-                                name_prop = props.GetValue(PKEY_Device_FriendlyName)
-                                if name_prop:
-                                    # Extract string from PROPVARIANT
-                                    if hasattr(name_prop, 'pwszVal') and name_prop.pwszVal:
-                                        name = name_prop.pwszVal
-                                    elif hasattr(name_prop, 'ToString'):
-                                        name = name_prop.ToString()
-                                    else:
-                                        name = str(name_prop)
+                                # Get the value using pointer
+                                from comtypes.automation import VARIANT
+                                import comtypes
+                                
+                                # Try using the raw COM method
+                                # IPropertyStore::GetValue takes REFPROPERTYKEY and PROPVARIANT*
+                                # We need to call it correctly
+                                
+                                # Alternative: use pycaw's built-in method if available
+                                if hasattr(device, 'GetFriendlyName'):
+                                    name = device.GetFriendlyName()
+                                elif hasattr(device, 'FriendlyName'):
+                                    name = device.FriendlyName
+                                else:
+                                    # Try direct property store access via ctypes
+                                    # The GetValue method signature is:
+                                    # HRESULT GetValue([in] REFPROPERTYKEY key, [out] PROPVARIANT *pv)
+                                    
+                                    # Create a PROPVARIANT-like buffer
+                                    class PROPVARIANT(Structure):
+                                        _fields_ = [
+                                            ("vt", ctypes.c_ushort),
+                                            ("wReserved1", ctypes.c_ushort),
+                                            ("wReserved2", ctypes.c_ushort),
+                                            ("wReserved3", ctypes.c_ushort),
+                                            ("pwszVal", ctypes.c_wchar_p),
+                                            ("padding", ctypes.c_byte * 8),
+                                        ]
+                                    
+                                    pv = PROPVARIANT()
+                                    
+                                    # Get the COM interface pointer
+                                    try:
+                                        hr = props.GetValue(ctypes_byref(PKEY_Device_FriendlyName), ctypes_byref(pv))
+                                        if pv.vt == 31 and pv.pwszVal:  # VT_LPWSTR = 31
+                                            name = pv.pwszVal
+                                    except Exception as e:
+                                        self.log_verbose(f"GetValue with byref failed for device {i}: {e}", "WARNING")
+                                        
                             except Exception as e:
-                                self.log_verbose(f"GetValue failed for device {i}: {e}", "WARNING")
+                                self.log_verbose(f"Property access failed for device {i}: {e}", "WARNING")
                     except Exception as e:
                         self.log_verbose(f"Could not open property store for device {i}: {e}", "WARNING")
-                    
-                    # Clean up name
-                    if name.startswith("Device ") and name[7:].isdigit():
-                        # Fallback: try to get name from device state/id
-                        try:
-                            state = device.GetState()
-                            if dev_id:
-                                # Extract name from device ID if possible
-                                # IDs look like: {0.0.0.00000000}.{guid}
-                                name = f"Audio Device {i} (Active)" if state == 1 else f"Audio Device {i}"
-                        except:
-                            pass
                     
                     device_info = {
                         'index': i,

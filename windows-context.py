@@ -11,6 +11,7 @@ import os
 import time
 import traceback
 import atexit
+import json
 from collections import OrderedDict
 
 # Windows API constants
@@ -18,6 +19,8 @@ DWMWA_CLOAKED = 14
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_APPWINDOW = 0x00040000
+
+SETTINGS_FILE = "window_manager_settings.json"
 
 
 class WindowManager:
@@ -51,8 +54,11 @@ class WindowManager:
         
         self.root.configure(bg=self.colors['bg'])
         
+        # Load settings
+        self.settings = self.load_settings()
+        
         # Debugging
-        self.debug_mode = tk.BooleanVar(value=False)
+        self.debug_mode = tk.BooleanVar(value=self.settings.get('debug_enabled', True))
         self.debug_log = []
         self.debug_dir = "windows-manager-debugging"
         
@@ -98,9 +104,31 @@ class WindowManager:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         atexit.register(self.export_debug_log_on_exit)
     
+    def load_settings(self):
+        """Load settings from file"""
+        try:
+            if os.path.exists(SETTINGS_FILE):
+                with open(SETTINGS_FILE, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            print(f"Error loading settings: {e}")
+        return {'debug_enabled': True}  # Default to debug enabled
+    
+    def save_settings(self):
+        """Save settings to file"""
+        try:
+            settings = {
+                'debug_enabled': self.debug_mode.get()
+            }
+            with open(SETTINGS_FILE, 'w') as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            print(f"Error saving settings: {e}")
+    
     def on_closing(self):
         """Handle window close"""
         self.audio_monitor_running = False
+        self.save_settings()
         if self.debug_log:
             self.log_debug("Application closing")
             self.export_debug_log()
@@ -200,17 +228,10 @@ class WindowManager:
         info["Volume Interface Type"] = str(type(self.volume_interface)) if self.volume_interface else "None"
         
         # Log all render devices
-        if self.audio_devices:
-            info["Render Device Count"] = len(self.audio_devices)
-            for i, dev in enumerate(self.audio_devices):
-                info[f"Render Device {i}"] = dev.get('name', 'Unknown')
-        
-        # Log all audio sessions
-        sessions = self.get_all_audio_sessions_all_devices(log_sessions=False)
-        info["Total Audio Sessions"] = len(sessions)
-        for i, (pid, session_list) in enumerate(sessions.items()):
-            for j, sess in enumerate(session_list):
-                info[f"Session {i}.{j}"] = f"PID={pid}, {sess.get('name', 'unknown')} @ {sess.get('device_name', 'unknown')}"
+        if hasattr(self, 'audio_endpoints') and self.audio_endpoints:
+            info["Audio Endpoint Count"] = len(self.audio_endpoints)
+            for i, ep in enumerate(self.audio_endpoints):
+                info[f"Audio Endpoint {i}"] = ep.get('name', 'Unknown')
         
         info["Muted PIDs"] = str(list(self.muted_pids))
         info["Volume Levels"] = str(dict(self.volume_levels))
@@ -248,8 +269,9 @@ class WindowManager:
             
             for pid, session_list in all_sessions.items():
                 for session_info in session_list:
-                    device_id = session_info.get('device_id', 'unknown')
-                    session_key = f"{pid}_{device_id}"
+                    device_name = session_info.get('device_name', 'unknown')
+                    session_id = session_info.get('session_id', id(session_info))
+                    session_key = f"{pid}_{device_name}_{session_id}"
                     
                     # Check if this is a new session we haven't seen
                     if pid not in self.known_sessions:
@@ -259,7 +281,6 @@ class WindowManager:
                     
                     if is_new_session:
                         self.known_sessions[pid].add(session_key)
-                        device_name = session_info.get('device_name', 'unknown')
                         proc_name = session_info.get('name', 'unknown')
                         
                         # Check if we need to enforce mute state
@@ -277,6 +298,7 @@ class WindowManager:
         except Exception as e:
             if self.debug_mode.get():
                 self.log_debug(f"Error in audio monitor: {e}", "ERROR")
+                self.log_debug(traceback.format_exc(), "ERROR")
     
     def _update_audio_btn_for_pid(self, pid, is_muted):
         """Update audio button icon for a specific PID"""
@@ -290,14 +312,6 @@ class WindowManager:
             if 'simple_audio' in session_info and session_info['simple_audio']:
                 session_info['simple_audio'].SetMute(int(mute), None)
                 return True
-            
-            if 'session_ctrl' in session_info and self.ISimpleAudioVolume:
-                try:
-                    simple_audio = session_info['session_ctrl'].QueryInterface(self.ISimpleAudioVolume)
-                    simple_audio.SetMute(int(mute), None)
-                    return True
-                except:
-                    pass
             
             if 'session' in session_info:
                 session = session_info['session']
@@ -318,14 +332,6 @@ class WindowManager:
                 session_info['simple_audio'].SetMasterVolume(level, None)
                 return True
             
-            if 'session_ctrl' in session_info and self.ISimpleAudioVolume:
-                try:
-                    simple_audio = session_info['session_ctrl'].QueryInterface(self.ISimpleAudioVolume)
-                    simple_audio.SetMasterVolume(level, None)
-                    return True
-                except:
-                    pass
-            
             if 'session' in session_info:
                 session = session_info['session']
                 if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
@@ -344,7 +350,8 @@ class WindowManager:
         self.ISimpleAudioVolume = None
         self.IAudioEndpointVolume = None
         self._speakers = None
-        self.audio_devices = []  # All render devices
+        self.audio_endpoints = []  # All audio endpoints (render devices)
+        self._device_enumerator = None
         
         self.log_debug("Initializing audio...")
         
@@ -367,15 +374,22 @@ class WindowManager:
                     self.log_debug(f"Failed to import AudioUtilities: {e}", "ERROR")
                     return
             
-            # Import comtypes
+            # Import comtypes stuff we need
             try:
-                from comtypes import CLSCTX_ALL
+                from comtypes import CLSCTX_ALL, CoCreateInstance, GUID
+                from pycaw.pycaw import IAudioSessionManager2, IAudioSessionControl2
                 self.CLSCTX_ALL = CLSCTX_ALL
-            except ImportError:
+                self.IAudioSessionManager2 = IAudioSessionManager2
+                self.IAudioSessionControl2 = IAudioSessionControl2
+                self.log_debug("Imported COM interfaces")
+            except ImportError as e:
+                self.log_debug(f"Failed to import COM interfaces: {e}", "WARNING")
                 self.CLSCTX_ALL = 0x17
+                self.IAudioSessionManager2 = None
+                self.IAudioSessionControl2 = None
             
-            # Enumerate ALL render devices (speakers, HDMI audio, etc.)
-            self._enumerate_all_devices()
+            # Enumerate ALL render devices using Windows MMDevice API
+            self._enumerate_all_endpoints()
             
             # Get default speakers for system volume control
             self._speakers = self.AudioUtilities.GetSpeakers()
@@ -434,53 +448,175 @@ class WindowManager:
             self.log_debug(f"Unexpected error initializing audio: {e}", "ERROR")
             self.log_debug(traceback.format_exc(), "ERROR")
     
-    def _enumerate_all_devices(self):
-        """Enumerate all audio render devices in the system"""
-        self.audio_devices = []
+    def _enumerate_all_endpoints(self):
+        """Enumerate all audio render endpoints (output devices) in the system"""
+        self.audio_endpoints = []
         
         if not self.AudioUtilities:
             return
         
         try:
-            # Try to get all devices
+            # Method 1: Use pycaw's GetAllDevices if available
             try:
-                devices = self.AudioUtilities.GetAllDevices()
-                if devices:
-                    for dev in devices:
-                        try:
-                            # Check if it's a render device
-                            flow = self.AudioUtilities.GetEndpointDataFlow(dev.id, 1) if hasattr(self.AudioUtilities, 'GetEndpointDataFlow') else 0
-                            if flow == 0:  # eRender
-                                self.audio_devices.append({
-                                    'device': dev,
-                                    'id': dev.id if hasattr(dev, 'id') else str(id(dev)),
-                                    'name': dev.FriendlyName if hasattr(dev, 'FriendlyName') else 'Unknown'
-                                })
-                                self.log_debug(f"Found render device: {dev.FriendlyName if hasattr(dev, 'FriendlyName') else 'Unknown'}")
-                        except Exception as e:
-                            pass
-            except Exception as e:
-                self.log_debug(f"GetAllDevices failed: {e}", "WARNING")
-            
-            # If no devices found via GetAllDevices, use IMMDeviceEnumerator directly
-            if not self.audio_devices:
-                try:
-                    from comtypes import CLSCTX_ALL, CoCreateInstance, GUID
-                    from ctypes import POINTER
+                from pycaw.pycaw import AudioUtilities as AU
+                
+                # Get device enumerator
+                from comtypes import CLSCTX_ALL, CoCreateInstance, GUID
+                from pycaw.pycaw import IMMDeviceEnumerator, IMMDevice
+                
+                CLSID_MMDeviceEnumerator = GUID('{BCDE0395-E52F-467C-8E3D-C4579291692E}')
+                
+                enumerator = CoCreateInstance(
+                    CLSID_MMDeviceEnumerator,
+                    IMMDeviceEnumerator,
+                    CLSCTX_ALL
+                )
+                
+                if enumerator:
+                    self._device_enumerator = enumerator
+                    self.log_debug("Got IMMDeviceEnumerator")
                     
-                    # Get device enumerator
-                    enumerator = self.AudioUtilities.GetDeviceEnumerator()
-                    if enumerator:
-                        self.log_debug("Got device enumerator, attempting to enumerate render devices")
-                        # This gives us the count, but pycaw's wrapper may be limited
-                        # We'll rely on GetAllSessions which iterates internally
-                except Exception as e:
-                    self.log_debug(f"Failed to get device enumerator: {e}", "WARNING")
+                    # eRender = 0, eAll = 2, DEVICE_STATE_ACTIVE = 1
+                    try:
+                        collection = enumerator.EnumAudioEndpoints(0, 1)  # eRender, DEVICE_STATE_ACTIVE
+                        if collection:
+                            count = collection.GetCount()
+                            self.log_debug(f"Found {count} render endpoints")
+                            
+                            for i in range(count):
+                                try:
+                                    device = collection.Item(i)
+                                    if device:
+                                        # Get device ID
+                                        device_id = device.GetId()
+                                        
+                                        # Get friendly name via property store
+                                        try:
+                                            from pycaw.pycaw import IPropertyStore, PKEY_Device_FriendlyName
+                                            props = device.OpenPropertyStore(0)  # STGM_READ
+                                            name_prop = props.GetValue(PKEY_Device_FriendlyName)
+                                            device_name = name_prop.value if hasattr(name_prop, 'value') else str(name_prop)
+                                        except:
+                                            device_name = f"Audio Device {i}"
+                                        
+                                        self.audio_endpoints.append({
+                                            'device': device,
+                                            'id': device_id,
+                                            'name': device_name,
+                                            'index': i
+                                        })
+                                        self.log_debug(f"Found endpoint: {device_name}")
+                                except Exception as e:
+                                    self.log_debug(f"Error getting device {i}: {e}", "WARNING")
+                    except Exception as e:
+                        self.log_debug(f"Error enumerating endpoints: {e}", "WARNING")
+                        
+            except Exception as e:
+                self.log_debug(f"COM device enumeration failed: {e}", "WARNING")
+                self.log_debug(traceback.format_exc(), "WARNING")
             
-            self.log_debug(f"Found {len(self.audio_devices)} render devices")
+            # Fallback: Try pycaw's built-in GetAllDevices
+            if not self.audio_endpoints:
+                try:
+                    devices = self.AudioUtilities.GetAllDevices()
+                    if devices:
+                        for i, dev in enumerate(devices):
+                            try:
+                                name = getattr(dev, 'FriendlyName', None) or getattr(dev, 'name', f'Device {i}')
+                                dev_id = getattr(dev, 'id', str(i))
+                                
+                                self.audio_endpoints.append({
+                                    'device': dev,
+                                    'id': dev_id,
+                                    'name': name,
+                                    'index': i
+                                })
+                                self.log_debug(f"Found device via GetAllDevices: {name}")
+                            except Exception as e:
+                                pass
+                except Exception as e:
+                    self.log_debug(f"GetAllDevices fallback failed: {e}", "WARNING")
+            
+            self.log_debug(f"Total audio endpoints found: {len(self.audio_endpoints)}")
             
         except Exception as e:
-            self.log_debug(f"Error enumerating devices: {e}", "ERROR")
+            self.log_debug(f"Error enumerating audio endpoints: {e}", "ERROR")
+            self.log_debug(traceback.format_exc(), "ERROR")
+    
+    def _get_sessions_for_endpoint(self, endpoint_info):
+        """Get all audio sessions for a specific endpoint/device"""
+        sessions = []
+        
+        if not self.IAudioSessionManager2:
+            return sessions
+        
+        try:
+            device = endpoint_info.get('device')
+            device_name = endpoint_info.get('name', 'Unknown')
+            
+            if not device:
+                return sessions
+            
+            # Try to get the underlying COM device
+            actual_device = None
+            if hasattr(device, '_dev'):
+                actual_device = device._dev
+            elif hasattr(device, 'Activate'):
+                actual_device = device
+            else:
+                return sessions
+            
+            # Get session manager for this device
+            try:
+                mgr = actual_device.Activate(
+                    self.IAudioSessionManager2._iid_,
+                    self.CLSCTX_ALL,
+                    None
+                )
+                
+                if mgr:
+                    enumerator = mgr.GetSessionEnumerator()
+                    if enumerator:
+                        count = enumerator.GetCount()
+                        
+                        for i in range(count):
+                            try:
+                                session_ctrl = enumerator.GetSession(i)
+                                if session_ctrl and self.IAudioSessionControl2:
+                                    ctrl2 = session_ctrl.QueryInterface(self.IAudioSessionControl2)
+                                    if ctrl2:
+                                        session_pid = ctrl2.GetProcessId()
+                                        if session_pid > 0:
+                                            try:
+                                                proc = psutil.Process(session_pid)
+                                                proc_name = proc.name()
+                                            except:
+                                                proc_name = f"PID {session_pid}"
+                                            
+                                            # Get SimpleAudioVolume interface
+                                            try:
+                                                simple_audio = session_ctrl.QueryInterface(self.ISimpleAudioVolume)
+                                            except:
+                                                simple_audio = None
+                                            
+                                            sessions.append({
+                                                'pid': session_pid,
+                                                'name': proc_name,
+                                                'device_name': device_name,
+                                                'session_id': i,
+                                                'session_ctrl': session_ctrl,
+                                                'simple_audio': simple_audio
+                                            })
+                            except Exception as e:
+                                pass
+            except Exception as e:
+                pass
+                
+        except Exception as e:
+            if self.debug_mode.get():
+                self.log_debug(f"Error getting sessions for {endpoint_info.get('name')}: {e}", "WARNING")
+        
+        return sessions
     
     def get_all_audio_sessions_all_devices(self, log_sessions=True):
         """Get audio sessions from ALL devices, not just the default"""
@@ -490,105 +626,64 @@ class WindowManager:
             return sessions_by_pid
         
         try:
-            # Method 1: Use GetAllSessions which queries the default device
-            all_sessions = self.AudioUtilities.GetAllSessions()
+            # Method 1: Get sessions from each enumerated endpoint
+            for endpoint in self.audio_endpoints:
+                endpoint_sessions = self._get_sessions_for_endpoint(endpoint)
+                for sess in endpoint_sessions:
+                    pid = sess['pid']
+                    if pid not in sessions_by_pid:
+                        sessions_by_pid[pid] = []
+                    sessions_by_pid[pid].append(sess)
             
-            if all_sessions:
-                for session in all_sessions:
-                    try:
-                        proc = session.Process
-                        if proc:
-                            pid = proc.pid
-                            proc_name = proc.name()
-                            
-                            session_id = id(session)
-                            
-                            if pid not in sessions_by_pid:
-                                sessions_by_pid[pid] = []
-                            
-                            sessions_by_pid[pid].append({
-                                'session': session,
-                                'name': proc_name,
-                                'device_id': f'default_{session_id}',
-                                'device_name': 'Default Device'
-                            })
-                    except:
-                        pass
-            
-            # Method 2: Query each device explicitly
-            for dev_info in self.audio_devices:
-                try:
-                    device = dev_info['device']
-                    device_name = dev_info['name']
-                    device_id = dev_info['id']
-                    
-                    # Get session manager for this device
-                    if hasattr(device, '_dev') and device._dev:
+            # Method 2: Also use GetAllSessions for default device (as fallback)
+            try:
+                all_sessions = self.AudioUtilities.GetAllSessions()
+                if all_sessions:
+                    for session in all_sessions:
                         try:
-                            from pycaw.pycaw import IAudioSessionManager2
-                            mgr = device._dev.Activate(
-                                IAudioSessionManager2._iid_,
-                                self.CLSCTX_ALL,
-                                None
-                            )
-                            if mgr:
-                                enumerator = mgr.GetSessionEnumerator()
-                                if enumerator:
-                                    count = enumerator.GetCount()
-                                    for i in range(count):
-                                        try:
-                                            session_ctrl = enumerator.GetSession(i)
-                                            if session_ctrl:
-                                                # Get process ID
-                                                ctrl2 = session_ctrl.QueryInterface(
-                                                    self.AudioUtilities.IAudioSessionControl2 if hasattr(self.AudioUtilities, 'IAudioSessionControl2') else None
-                                                )
-                                                if ctrl2:
-                                                    session_pid = ctrl2.GetProcessId()
-                                                    if session_pid > 0:
-                                                        try:
-                                                            proc = psutil.Process(session_pid)
-                                                            proc_name = proc.name()
-                                                        except:
-                                                            proc_name = f"PID {session_pid}"
-                                                        
-                                                        session_key = f'{device_id}_{i}'
-                                                        
-                                                        if session_pid not in sessions_by_pid:
-                                                            sessions_by_pid[session_pid] = []
-                                                        
-                                                        # Check if we already have this session
-                                                        already_have = False
-                                                        for existing in sessions_by_pid[session_pid]:
-                                                            if existing['device_id'] == device_id:
-                                                                already_have = True
-                                                                break
-                                                        
-                                                        if not already_have:
-                                                            sessions_by_pid[session_pid].append({
-                                                                'session_ctrl': session_ctrl,
-                                                                'name': proc_name,
-                                                                'device_id': device_id,
-                                                                'device_name': device_name
-                                                            })
-                                                            self.log_debug(f"Found session: {proc_name} on {device_name}")
-                                        except:
-                                            pass
-                        except Exception as e:
+                            proc = session.Process
+                            if proc:
+                                pid = proc.pid
+                                proc_name = proc.name()
+                                
+                                # Check if we already have this PID from endpoint enumeration
+                                already_have = pid in sessions_by_pid
+                                
+                                if not already_have:
+                                    sessions_by_pid[pid] = []
+                                
+                                # Add if not duplicate
+                                is_dup = False
+                                for existing in sessions_by_pid.get(pid, []):
+                                    if existing.get('device_name') == 'Default Device':
+                                        is_dup = True
+                                        break
+                                
+                                if not is_dup:
+                                    sessions_by_pid[pid].append({
+                                        'pid': pid,
+                                        'name': proc_name,
+                                        'device_name': 'Default Device',
+                                        'session_id': id(session),
+                                        'session': session
+                                    })
+                        except:
                             pass
-                except Exception as e:
-                    pass
+            except Exception as e:
+                if log_sessions:
+                    self.log_debug(f"GetAllSessions fallback error: {e}", "WARNING")
             
             if log_sessions and sessions_by_pid:
                 session_strs = []
                 for pid, sess_list in sessions_by_pid.items():
                     for sess in sess_list:
-                        session_strs.append(f"{sess['name']}@{sess['device_name']}")
+                        session_strs.append(f"{sess['name']}(PID:{pid})@{sess['device_name']}")
                 self.log_debug(f"Audio sessions: {', '.join(session_strs)}")
                 
         except Exception as e:
             if log_sessions:
                 self.log_debug(f"Error getting audio sessions: {e}", "ERROR")
+                self.log_debug(traceback.format_exc(), "ERROR")
         
         return sessions_by_pid
     
@@ -604,7 +699,7 @@ class WindowManager:
             if log_lookup:
                 count = len(all_sessions[pid])
                 devices = [s['device_name'] for s in all_sessions[pid]]
-                self.log_debug(f"Found {count} audio session(s) for PID {pid} on: {', '.join(devices)}")
+                self.log_debug(f"Found {count} audio session(s) for PID {pid} on: {', '.join(set(devices))}")
             return all_sessions[pid]
         
         # Try to find by process tree
@@ -639,13 +734,13 @@ class WindowManager:
         # Return volume from first session found
         session_info = sessions[0]
         try:
+            if 'simple_audio' in session_info and session_info['simple_audio']:
+                return session_info['simple_audio'].GetMasterVolume()
+            
             if 'session' in session_info:
                 session = session_info['session']
                 if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
                     return session.SimpleAudioVolume.GetMasterVolume()
-            if 'session_ctrl' in session_info and self.ISimpleAudioVolume:
-                volume_interface = session_info['session_ctrl'].QueryInterface(self.ISimpleAudioVolume)
-                return volume_interface.GetMasterVolume()
         except Exception as e:
             if log_lookup:
                 self.log_debug(f"Error getting app volume for PID {pid}: {e}", "WARNING")
@@ -676,13 +771,13 @@ class WindowManager:
         
         session_info = sessions[0]
         try:
+            if 'simple_audio' in session_info and session_info['simple_audio']:
+                return bool(session_info['simple_audio'].GetMute())
+            
             if 'session' in session_info:
                 session = session_info['session']
                 if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
                     return bool(session.SimpleAudioVolume.GetMute())
-            if 'session_ctrl' in session_info and self.ISimpleAudioVolume:
-                volume_interface = session_info['session_ctrl'].QueryInterface(self.ISimpleAudioVolume)
-                return bool(volume_interface.GetMute())
         except Exception as e:
             if log_lookup:
                 self.log_debug(f"Error getting app mute for PID {pid}: {e}", "WARNING")
@@ -710,6 +805,9 @@ class WindowManager:
                 device_name = session_info.get('device_name', 'unknown')
                 if log_lookup:
                     self.log_debug(f"Set mute={mute} for PID {pid} on {device_name}")
+        
+        if log_lookup:
+            self.log_debug(f"Set mute={mute} for PID {pid}")
         
         return success
     
@@ -783,6 +881,7 @@ class WindowManager:
     
     def toggle_debug(self):
         """Toggle debug mode and export log"""
+        self.save_settings()
         if self.debug_mode.get():
             self.log_debug("Debug mode enabled")
             self.status_var.set("Debug mode ON - actions will be logged")
@@ -1011,7 +1110,8 @@ class WindowManager:
         audio_frame.pack(fill=tk.X, pady=(0, 10))
         
         audio_status = "🔊" if self.audio_available else "🔇❌"
-        ttk.Label(audio_frame, text=f"Audio {audio_status}:", style='Muted.TLabel').pack(side=tk.LEFT)
+        endpoint_count = len(self.audio_endpoints) if self.audio_endpoints else 0
+        ttk.Label(audio_frame, text=f"Audio {audio_status} ({endpoint_count} devices):", style='Muted.TLabel').pack(side=tk.LEFT)
         
         self.bulk_mute_btn = tk.Button(audio_frame, text="🔇 Mute", 
                                         bg=self.colors['card'], fg=self.colors['fg'],
@@ -1168,8 +1268,8 @@ class WindowManager:
         # Refresh monitors
         self.monitors = self.get_monitors()
         
-        # Re-enumerate audio devices
-        self._enumerate_all_devices()
+        # Re-enumerate audio endpoints
+        self._enumerate_all_endpoints()
         
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()

@@ -32,7 +32,7 @@ Download and install Python from [python.org](https://python.org)
 Open Command Prompt or PowerShell and run:
 
 bash
-pip install pywin32 psutil pycaw comtypes
+pip install pywin32 psutil pycaw comtypes keyboard
 
 
 ### 3. Download
@@ -118,6 +118,12 @@ pip install pycaw comtypes
 - Some apps use separate audio processes
 - Click **🎧 Sessions** to see all active audio sessions
 
+## Hotkey
+
+Default hotkey: `Ctrl+Win+M` - Toggle app visibility (minimize/restore)
+
+Configure via the ⌨ button in the header.
+
 ## Dependencies
 
 | Package | Purpose |
@@ -126,6 +132,7 @@ pip install pycaw comtypes
 | `psutil` | Process information |
 | `pycaw` | Audio session control |
 | `comtypes` | COM interface support |
+| `keyboard` | Global hotkey support |
 
 ## License
 

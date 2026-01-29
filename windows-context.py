@@ -3,6 +3,7 @@ if sys.platform == 'win32':
     import ctypes
 import tkinter as tk
 
+import keyboard
 from tkinter import ttk
 import ctypes
 from ctypes import wintypes
@@ -65,6 +66,7 @@ class WindowManager:
         # Load settings
         self.settings = self.load_settings()
 
+
         # Pinned windows tracking
         self.pinned_windows = set()  # Current hwnds that are pinned
         self.pinned_identifiers = self.settings.get('pinned_identifiers', set())
@@ -93,6 +95,13 @@ class WindowManager:
         # Audio state tracking
         self.muted_pids = set()
         self.volume_levels = {}
+
+        
+        # Hotkey settings
+        self.hotkey_enabled = tk.BooleanVar(value=self.settings.get('hotkey_enabled', True))
+        self.hotkey_binding = self.settings.get('hotkey_binding', 'ctrl+win+m')
+        self.hotkey_registered = False
+        self.register_hotkey()
         
         # Volume slider popup
         self.volume_slider_window = None
@@ -153,6 +162,7 @@ class WindowManager:
     def on_closing(self):
         """Handle window close"""
         self.audio_monitor_running = False
+        self.unregister_hotkey()
         self.save_settings()
         if self.debug_log:
             self.log_debug("Application closing")
@@ -1116,7 +1126,11 @@ class WindowManager:
                                     variable=self.debug_mode,
                                     command=self.toggle_debug)
         debug_cb.pack(side=tk.RIGHT, padx=(5, 0))
-        
+
+        hotkey_btn = ttk.Button(header_frame, text="⌨", width=3,
+                                command=self.show_hotkey_settings, style='Small.TButton')
+        hotkey_btn.pack(side=tk.RIGHT, padx=(0, 5))
+
         pin_cb = ttk.Checkbutton(header_frame, text="📌 Pin", 
                                   variable=self.pin_to_top,
                                   command=self.toggle_pin)
@@ -1546,8 +1560,9 @@ class WindowManager:
         focus_btn.pack(side=tk.LEFT)
         
         minmax_btn = tk.Button(actions, text="□", width=2, command=lambda h=hwnd: self.toggle_minmax(h), **btn_style)
-        minmax_btn.pack(side=tk.LEFT)
-        
+        minmax_btn.bind('<Button-3>', lambda e, h=hwnd: self.show_window_state_menu(e, h))
+        minmax_btn.pack(side=tk.LEFT)       
+
         is_tracked_muted = pid in self.muted_pids
         if is_tracked_muted:
             audio_icon = "🔇"
@@ -1685,6 +1700,169 @@ class WindowManager:
         
         card.bind('<Configure>', on_card_resize)
         #end of create window card
+
+    def show_window_state_menu(self, event, hwnd):
+        """Show context menu for window state options"""
+        menu = tk.Menu(self.root, tearoff=0, bg=self.colors['card'], fg=self.colors['fg'],
+                    activebackground=self.colors['accent'], activeforeground='white',
+                    font=('Segoe UI', 9))
+        
+        # Get current window state for indicators
+        is_maximized = self.is_window_maximized(hwnd)
+        is_minimized = self.is_window_minimized(hwnd)
+        
+        # Maximize option
+        max_label = "✓ Maximize" if is_maximized else "  Maximize"
+        menu.add_command(label=max_label, command=lambda: self.maximize_window(hwnd))
+        
+        # Minimize option
+        min_label = "✓ Minimize" if is_minimized else "  Minimize"
+        menu.add_command(label=min_label, command=lambda: self.minimize_window(hwnd))
+        
+        # Restore option
+        menu.add_command(label="  Restore", command=lambda: self.restore_window(hwnd))
+        
+        menu.add_separator()
+        
+        # Fullscreen option
+        menu.add_command(label="  Fullscreen", command=lambda: self.fullscreen_window(hwnd))
+        
+        menu.add_separator()
+        
+        # Split options
+        menu.add_command(label="  Split Left", command=lambda: self.split_window_left(hwnd))
+        menu.add_command(label="  Split Right", command=lambda: self.split_window_right(hwnd))
+        
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def maximize_window(self, hwnd):
+        """Maximize a window"""
+        self.ensure_topmost_during_action()
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
+            self.status_var.set("Window maximized")
+            self.log_debug(f"Maximized window {hwnd}")
+        except Exception as e:
+            self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error maximizing window {hwnd}: {e}", "ERROR")
+
+    def minimize_window(self, hwnd):
+        """Minimize a window"""
+        self.ensure_topmost_during_action()
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
+            self.status_var.set("Window minimized")
+            self.log_debug(f"Minimized window {hwnd}")
+        except Exception as e:
+            self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error minimizing window {hwnd}: {e}", "ERROR")
+
+    def restore_window(self, hwnd):
+        """Restore a window to normal state"""
+        self.ensure_topmost_during_action()
+        try:
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            self.status_var.set("Window restored")
+            self.log_debug(f"Restored window {hwnd}")
+        except Exception as e:
+            self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error restoring window {hwnd}: {e}", "ERROR")
+
+    def fullscreen_window(self, hwnd):
+        """Make window fullscreen (covers entire monitor including taskbar)"""
+        self.ensure_topmost_during_action()
+        try:
+            # Get the monitor this window is on
+            monitor_idx = self.get_window_monitor_index(hwnd)
+            monitor = self.monitors[monitor_idx]
+            
+            # Use monitor_area (full screen) not work_area (excludes taskbar)
+            mon_area = monitor['monitor_area']
+            x, y = mon_area[0], mon_area[1]
+            width = mon_area[2] - mon_area[0]
+            height = mon_area[3] - mon_area[1]
+            
+            # Restore first if maximized/minimized
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            
+            # Remove window borders for true fullscreen
+            style = win32gui.GetWindowLong(hwnd, win32con.GWL_STYLE)
+            win32gui.SetWindowLong(hwnd, win32con.GWL_STYLE, 
+                                style & ~win32con.WS_OVERLAPPEDWINDOW)
+            
+            # Position window to cover entire monitor
+            win32gui.SetWindowPos(hwnd, win32con.HWND_TOP,
+                                x, y, width, height,
+                                win32con.SWP_SHOWWINDOW | win32con.SWP_FRAMECHANGED)
+            
+            self.status_var.set("Window fullscreen")
+            self.log_debug(f"Fullscreen window {hwnd} on {monitor['short_name']}")
+        except Exception as e:
+            self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error fullscreen window {hwnd}: {e}", "ERROR")
+
+    def split_window_left(self, hwnd):
+        """Snap window to left half of its current monitor"""
+        self.ensure_topmost_during_action()
+        try:
+            # Get the monitor this window is on
+            monitor_idx = self.get_window_monitor_index(hwnd)
+            monitor = self.monitors[monitor_idx]
+            work_area = monitor['work_area']
+            
+            x, y = work_area[0], work_area[1]
+            width = (work_area[2] - work_area[0]) // 2
+            height = work_area[3] - work_area[1]
+            
+            # Restore first if maximized/minimized
+            if self.is_window_maximized(hwnd) or self.is_window_minimized(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            
+            win32gui.SetWindowPos(hwnd, win32con.HWND_TOP,
+                                x, y, width, height,
+                                win32con.SWP_SHOWWINDOW)
+            
+            self.status_var.set("Window snapped left")
+            self.log_debug(f"Split window {hwnd} to left on {monitor['short_name']}")
+        except Exception as e:
+            self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error splitting window left {hwnd}: {e}", "ERROR")
+
+    def split_window_right(self, hwnd):
+        """Snap window to right half of its current monitor"""
+        self.ensure_topmost_during_action()
+        try:
+            # Get the monitor this window is on
+            monitor_idx = self.get_window_monitor_index(hwnd)
+            monitor = self.monitors[monitor_idx]
+            work_area = monitor['work_area']
+            
+            half_width = (work_area[2] - work_area[0]) // 2
+            x = work_area[0] + half_width
+            y = work_area[1]
+            width = half_width
+            height = work_area[3] - work_area[1]
+            
+            # Restore first if maximized/minimized
+            if self.is_window_maximized(hwnd) or self.is_window_minimized(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+            
+            win32gui.SetWindowPos(hwnd, win32con.HWND_TOP,
+                                x, y, width, height,
+                                win32con.SWP_SHOWWINDOW)
+            
+            self.status_var.set("Window snapped right")
+            self.log_debug(f"Split window {hwnd} to right on {monitor['short_name']}")
+        except Exception as e:
+            self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error splitting window right {hwnd}: {e}", "ERROR")
+
+
+
+
 
     def toggle_pin_to_list(self, hwnd, process, title, btn):
         """Toggle whether a window is pinned to the top of the list"""
@@ -2223,6 +2401,157 @@ class WindowManager:
         """Run the application"""
         self.log_debug("Application started")
         self.root.mainloop()
+
+
+
+    def register_hotkey(self):
+        """Register the global hotkey"""
+        if self.hotkey_registered:
+            self.unregister_hotkey()
+        
+        if not self.hotkey_enabled.get():
+            return
+        
+        try:
+            keyboard.add_hotkey(self.hotkey_binding, self.toggle_app_visibility, suppress=True)
+            self.hotkey_registered = True
+            self.log_debug(f"Registered hotkey: {self.hotkey_binding}")
+        except Exception as e:
+            self.log_debug(f"Failed to register hotkey: {e}", "ERROR")
+            self.hotkey_registered = False
+
+    def unregister_hotkey(self):
+        """Unregister the global hotkey"""
+        if self.hotkey_registered:
+            try:
+                keyboard.remove_hotkey(self.hotkey_binding)
+                self.log_debug(f"Unregistered hotkey: {self.hotkey_binding}")
+            except Exception as e:
+                self.log_debug(f"Error unregistering hotkey: {e}", "WARNING")
+            self.hotkey_registered = False
+
+    def toggle_app_visibility(self):
+        """Toggle the app between minimized and restored"""
+        try:
+            # Use after() to run in main thread
+            self.root.after(0, self._toggle_visibility_impl)
+        except Exception as e:
+            self.log_debug(f"Error toggling visibility: {e}", "ERROR")
+
+    def _toggle_visibility_impl(self):
+        """Implementation of visibility toggle (runs in main thread)"""
+        try:
+            if self.root.state() == 'iconic' or not self.root.winfo_viewable():
+                # Window is minimized or hidden - restore it
+                self.root.deiconify()
+                self.root.lift()
+                self.root.focus_force()
+                self.status_var.set("Window restored")
+                self.log_debug("App restored via hotkey")
+            else:
+                # Window is visible - minimize it
+                self.root.iconify()
+                self.status_var.set("Window minimized")
+                self.log_debug("App minimized via hotkey")
+        except Exception as e:
+            self.log_debug(f"Error in toggle visibility: {e}", "ERROR")
+
+    def toggle_hotkey_enabled(self):
+        """Toggle hotkey on/off"""
+        if self.hotkey_enabled.get():
+            self.register_hotkey()
+            self.status_var.set(f"Hotkey enabled: {self.hotkey_binding}")
+        else:
+            self.unregister_hotkey()
+            self.status_var.set("Hotkey disabled")
+        self.save_settings()
+
+    def show_hotkey_settings(self):
+        """Show hotkey configuration dialog"""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Hotkey Settings")
+        dialog.geometry("320x200")
+        dialog.configure(bg=self.colors['bg'])
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Center on parent
+        dialog.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - 320) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - 200) // 2
+        dialog.geometry(f"+{x}+{y}")
+        
+        # Title
+        tk.Label(dialog, text="Hotkey Configuration", bg=self.colors['bg'], 
+                fg=self.colors['fg'], font=('Segoe UI', 12, 'bold')).pack(pady=(15, 10))
+        
+        # Enable checkbox
+        enable_frame = tk.Frame(dialog, bg=self.colors['bg'])
+        enable_frame.pack(fill=tk.X, padx=20, pady=5)
+        
+        enable_cb = tk.Checkbutton(enable_frame, text="Enable hotkey", 
+                                    variable=self.hotkey_enabled,
+                                    bg=self.colors['bg'], fg=self.colors['fg'],
+                                    selectcolor=self.colors['bg'],
+                                    activebackground=self.colors['bg'],
+                                    font=('Segoe UI', 10))
+        enable_cb.pack(side=tk.LEFT)
+        
+        # Hotkey entry
+        hotkey_frame = tk.Frame(dialog, bg=self.colors['bg'])
+        hotkey_frame.pack(fill=tk.X, padx=20, pady=10)
+        
+        tk.Label(hotkey_frame, text="Hotkey:", bg=self.colors['bg'], 
+                fg=self.colors['fg'], font=('Segoe UI', 10)).pack(side=tk.LEFT)
+        
+        hotkey_var = tk.StringVar(value=self.hotkey_binding)
+        hotkey_entry = tk.Entry(hotkey_frame, textvariable=hotkey_var, width=20,
+                                bg=self.colors['card'], fg=self.colors['fg'],
+                                insertbackground=self.colors['fg'],
+                                font=('Segoe UI', 10))
+        hotkey_entry.pack(side=tk.LEFT, padx=(10, 0))
+        
+        # Help text
+        tk.Label(dialog, text="Examples: ctrl+win+m, ctrl+shift+w, alt+f1",
+                bg=self.colors['bg'], fg=self.colors['muted'],
+                font=('Segoe UI', 8)).pack(pady=(0, 10))
+        
+        # Status
+        status_text = "✓ Active" if self.hotkey_registered else "✗ Inactive"
+        status_color = self.colors['success'] if self.hotkey_registered else self.colors['muted_icon']
+        status_label = tk.Label(dialog, text=status_text, bg=self.colors['bg'], 
+                                fg=status_color, font=('Segoe UI', 9))
+        status_label.pack()
+        
+        # Buttons
+        btn_frame = tk.Frame(dialog, bg=self.colors['bg'])
+        btn_frame.pack(fill=tk.X, padx=20, pady=15)
+        
+        def save_and_close():
+            new_binding = hotkey_var.get().strip().lower()
+            if new_binding and new_binding != self.hotkey_binding:
+                self.unregister_hotkey()
+                self.hotkey_binding = new_binding
+                if self.hotkey_enabled.get():
+                    self.register_hotkey()
+            else:
+                if self.hotkey_enabled.get() and not self.hotkey_registered:
+                    self.register_hotkey()
+                elif not self.hotkey_enabled.get() and self.hotkey_registered:
+                    self.unregister_hotkey()
+            self.save_settings()
+            dialog.destroy()
+        
+        def cancel():
+            dialog.destroy()
+        
+        tk.Button(btn_frame, text="Cancel", command=cancel,
+                bg=self.colors['card'], fg=self.colors['fg'],
+                font=('Segoe UI', 9), bd=0, padx=15, pady=5).pack(side=tk.LEFT)
+        
+        tk.Button(btn_frame, text="Save", command=save_and_close,
+                bg=self.colors['accent'], fg='white',
+                font=('Segoe UI', 9, 'bold'), bd=0, padx=20, pady=5).pack(side=tk.RIGHT)
 
 
 def main():

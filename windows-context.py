@@ -7,6 +7,9 @@ import win32con
 import win32process
 import win32api
 import psutil
+import os
+import time
+import traceback
 from collections import OrderedDict
 
 # Windows API constants
@@ -22,7 +25,7 @@ class WindowManager:
         self.root.title("Window Manager")
         
         # Smaller, sleeker window
-        self.root.geometry("420x550")
+        self.root.geometry("420x580")
         self.root.minsize(380, 400)
         self.root.resizable(True, True)
         
@@ -47,6 +50,11 @@ class WindowManager:
         }
         
         self.root.configure(bg=self.colors['bg'])
+        
+        # Debugging
+        self.debug_mode = tk.BooleanVar(value=False)
+        self.debug_log = []
+        self.debug_dir = "windows-manager-debugging"
         
         # Pin to top variable - explicitly set to False initially
         self.pin_to_top = tk.BooleanVar(value=False)
@@ -76,44 +84,263 @@ class WindowManager:
         self.setup_ui()
         self.refresh_windows()
     
+    def log_debug(self, message, level="INFO"):
+        """Add a message to the debug log"""
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        entry = f"[{timestamp}] [{level}] {message}"
+        self.debug_log.append(entry)
+        
+        # Keep log from growing too large
+        if len(self.debug_log) > 1000:
+            self.debug_log = self.debug_log[-500:]
+        
+        # Print to console if debug mode is on
+        if self.debug_mode.get():
+            print(entry)
+    
+    def export_debug_log(self):
+        """Export debug log to a file"""
+        # Create debug directory if it doesn't exist
+        if not os.path.exists(self.debug_dir):
+            os.makedirs(self.debug_dir)
+        
+        # Generate filename with unix timestamp
+        unix_time = int(time.time())
+        filename = os.path.join(self.debug_dir, f"debug_{unix_time}.log")
+        
+        # Gather system info
+        system_info = self.gather_system_info()
+        
+        # Write log file
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write("=" * 60 + "\n")
+            f.write("WINDOW MANAGER DEBUG LOG\n")
+            f.write(f"Exported: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Unix Timestamp: {unix_time}\n")
+            f.write("=" * 60 + "\n\n")
+            
+            f.write("SYSTEM INFORMATION\n")
+            f.write("-" * 40 + "\n")
+            for key, value in system_info.items():
+                f.write(f"{key}: {value}\n")
+            f.write("\n")
+            
+            f.write("DEBUG LOG\n")
+            f.write("-" * 40 + "\n")
+            for entry in self.debug_log:
+                f.write(entry + "\n")
+        
+        self.status_var.set(f"Debug log exported: {filename}")
+        self.log_debug(f"Debug log exported to {filename}")
+        return filename
+    
+    def gather_system_info(self):
+        """Gather system information for debugging"""
+        info = {}
+        
+        # Python version
+        import sys
+        info["Python Version"] = sys.version
+        
+        # OS info
+        import platform
+        info["OS"] = platform.system()
+        info["OS Version"] = platform.version()
+        info["OS Release"] = platform.release()
+        info["Machine"] = platform.machine()
+        
+        # Module versions
+        try:
+            import pycaw
+            info["pycaw Version"] = getattr(pycaw, '__version__', 'unknown')
+        except ImportError:
+            info["pycaw Version"] = "NOT INSTALLED"
+        
+        try:
+            import comtypes
+            info["comtypes Version"] = getattr(comtypes, '__version__', 'unknown')
+        except ImportError:
+            info["comtypes Version"] = "NOT INSTALLED"
+        
+        try:
+            info["psutil Version"] = psutil.__version__
+        except:
+            info["psutil Version"] = "unknown"
+        
+        try:
+            import win32api
+            info["pywin32"] = "installed"
+        except:
+            info["pywin32"] = "NOT INSTALLED"
+        
+        # Audio status
+        info["Audio Available"] = self.audio_available
+        info["Volume Interface"] = str(type(self.volume_interface)) if self.volume_interface else "None"
+        
+        # Monitor info
+        info["Monitor Count"] = len(self.monitors)
+        for i, mon in enumerate(self.monitors):
+            info[f"Monitor {i+1}"] = f"{mon['name']} - {mon['resolution']}"
+        
+        # Window count
+        info["Tracked Windows"] = len(self.windows_list)
+        
+        return info
+    
     def init_audio(self):
         """Initialize audio control via pycaw"""
         self.audio_available = False
         self.volume_interface = None
         
+        self.log_debug("Initializing audio...")
+        
         try:
-            from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import IAudioEndpointVolume
+            from comtypes import CLSCTX_ALL, CoInitialize, CoCreateInstance, GUID
             from ctypes import cast, POINTER
             
-            self.AudioUtilities = AudioUtilities
-            self.ISimpleAudioVolume = ISimpleAudioVolume
+            self.log_debug("comtypes imported successfully")
+            
+            # Try to import pycaw
+            try:
+                from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume, IAudioEndpointVolume
+                self.AudioUtilities = AudioUtilities
+                self.ISimpleAudioVolume = ISimpleAudioVolume
+                self.IAudioEndpointVolume = IAudioEndpointVolume
+                self.log_debug("pycaw imported successfully")
+            except ImportError as e:
+                self.log_debug(f"Failed to import pycaw: {e}", "ERROR")
+                return
+            
             self.CLSCTX_ALL = CLSCTX_ALL
-            self.IAudioEndpointVolume = IAudioEndpointVolume
             self.cast = cast
             self.POINTER = POINTER
             
-            # Get the speakers/default audio endpoint
-            devices = AudioUtilities.GetSpeakers()
+            # Initialize COM
+            try:
+                CoInitialize()
+                self.log_debug("COM initialized")
+            except Exception as e:
+                self.log_debug(f"COM already initialized or error: {e}", "WARNING")
             
-            # Activate the IAudioEndpointVolume interface
-            interface = devices.Activate(
-                IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+            # Get speakers device - try multiple methods
+            speakers = None
             
-            # Cast to the volume interface
-            self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+            # Method 1: Try GetSpeakers()
+            try:
+                speakers = AudioUtilities.GetSpeakers()
+                self.log_debug(f"GetSpeakers() returned: {type(speakers)}")
+                self.log_debug(f"Speakers object attributes: {dir(speakers)}")
+            except Exception as e:
+                self.log_debug(f"GetSpeakers() failed: {e}", "ERROR")
             
-            self.audio_available = True
-            print("Audio control initialized successfully")
+            if speakers is None:
+                self.log_debug("Could not get speakers device", "ERROR")
+                return
+            
+            # Try to activate the volume interface
+            # Method 1: Direct Activate call (older pycaw)
+            try:
+                if hasattr(speakers, 'Activate'):
+                    self.log_debug("Trying speakers.Activate()...")
+                    interface = speakers.Activate(
+                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                    self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+                    self.audio_available = True
+                    self.log_debug("Audio initialized via Activate()", "SUCCESS")
+                    return
+            except Exception as e:
+                self.log_debug(f"Activate() method failed: {e}", "WARNING")
+            
+            # Method 2: Try using the endpoint directly (newer pycaw)
+            try:
+                if hasattr(speakers, '_endpoint'):
+                    self.log_debug("Trying speakers._endpoint.Activate()...")
+                    endpoint = speakers._endpoint
+                    self.log_debug(f"Endpoint type: {type(endpoint)}")
+                    self.log_debug(f"Endpoint attributes: {dir(endpoint)}")
+                    
+                    interface = endpoint.Activate(
+                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                    self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+                    self.audio_available = True
+                    self.log_debug("Audio initialized via _endpoint.Activate()", "SUCCESS")
+                    return
+            except Exception as e:
+                self.log_debug(f"_endpoint.Activate() failed: {e}", "WARNING")
+            
+            # Method 3: Try GetEndpoint() (another pycaw variant)
+            try:
+                if hasattr(speakers, 'GetEndpoint'):
+                    self.log_debug("Trying speakers.GetEndpoint()...")
+                    endpoint = speakers.GetEndpoint()
+                    interface = endpoint.Activate(
+                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                    self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+                    self.audio_available = True
+                    self.log_debug("Audio initialized via GetEndpoint()", "SUCCESS")
+                    return
+            except Exception as e:
+                self.log_debug(f"GetEndpoint() failed: {e}", "WARNING")
+            
+            # Method 4: Direct COM approach
+            try:
+                self.log_debug("Trying direct COM approach...")
+                from comtypes import CLSCTX_ALL
+                from pycaw.pycaw import CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, EDataFlow, ERole
+                
+                # Create device enumerator
+                enumerator = CoCreateInstance(
+                    CLSID_MMDeviceEnumerator,
+                    IMMDeviceEnumerator,
+                    CLSCTX_ALL
+                )
+                self.log_debug(f"Device enumerator created: {type(enumerator)}")
+                
+                # Get default audio endpoint
+                device = enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender.value, ERole.eMultimedia.value)
+                self.log_debug(f"Default endpoint obtained: {type(device)}")
+                
+                # Activate volume interface
+                interface = device.Activate(
+                    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+                self.audio_available = True
+                self.log_debug("Audio initialized via direct COM", "SUCCESS")
+                return
+                
+            except Exception as e:
+                self.log_debug(f"Direct COM approach failed: {e}", "ERROR")
+                self.log_debug(traceback.format_exc(), "ERROR")
+            
+            # Method 5: Simplest pycaw approach
+            try:
+                self.log_debug("Trying simplest pycaw approach...")
+                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+                from comtypes import cast, POINTER, CLSCTX_ALL
+                
+                devices = AudioUtilities.GetSpeakers()
+                
+                # Check if it's wrapped
+                if hasattr(devices, 'activate'):
+                    self.log_debug("Using lowercase activate()...")
+                    interface = devices.activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                    self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+                    self.audio_available = True
+                    self.log_debug("Audio initialized via activate()", "SUCCESS")
+                    return
+                    
+            except Exception as e:
+                self.log_debug(f"Simplest approach failed: {e}", "ERROR")
+            
+            self.log_debug("All audio initialization methods failed", "ERROR")
             
         except ImportError as e:
-            print(f"pycaw not available - audio control disabled: {e}")
+            self.log_debug(f"Import error: {e}", "ERROR")
+            print(f"pycaw/comtypes not available - audio control disabled: {e}")
             print("Install with: pip install pycaw comtypes")
         except Exception as e:
-            print(f"Error initializing audio: {e}")
-            import traceback
-            traceback.print_exc()
+            self.log_debug(f"Unexpected error initializing audio: {e}", "ERROR")
+            self.log_debug(traceback.format_exc(), "ERROR")
     
     def get_audio_session_for_pid(self, pid):
         """Get audio session for a specific process ID"""
@@ -125,7 +352,7 @@ class WindowManager:
                 if session.Process and session.Process.pid == pid:
                     return session
         except Exception as e:
-            pass
+            self.log_debug(f"Error getting audio session for PID {pid}: {e}", "WARNING")
         return None
     
     def get_app_volume(self, pid):
@@ -138,7 +365,7 @@ class WindowManager:
                 volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
                 return volume_interface.GetMasterVolume()
             except Exception as e:
-                pass
+                self.log_debug(f"Error getting app volume for PID {pid}: {e}", "WARNING")
         return None
     
     def set_app_volume(self, pid, level):
@@ -152,7 +379,7 @@ class WindowManager:
                 volume_interface.SetMasterVolume(float(level), None)
                 return True
             except Exception as e:
-                pass
+                self.log_debug(f"Error setting app volume for PID {pid}: {e}", "WARNING")
         return False
     
     def get_app_mute(self, pid):
@@ -165,7 +392,7 @@ class WindowManager:
                 volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
                 return bool(volume_interface.GetMute())
             except Exception as e:
-                pass
+                self.log_debug(f"Error getting app mute for PID {pid}: {e}", "WARNING")
         return None
     
     def set_app_mute(self, pid, mute):
@@ -179,29 +406,34 @@ class WindowManager:
                 volume_interface.SetMute(int(mute), None)
                 return True
             except Exception as e:
-                pass
+                self.log_debug(f"Error setting app mute for PID {pid}: {e}", "WARNING")
         return False
     
     def get_system_volume(self):
         """Get system master volume (0.0 to 1.0)"""
         if not self.audio_available or not self.volume_interface:
+            self.log_debug("Cannot get system volume - audio not available", "WARNING")
             return 1.0
         try:
-            return self.volume_interface.GetMasterVolumeLevelScalar()
+            vol = self.volume_interface.GetMasterVolumeLevelScalar()
+            self.log_debug(f"Got system volume: {vol}")
+            return vol
         except Exception as e:
-            print(f"Error getting system volume: {e}")
+            self.log_debug(f"Error getting system volume: {e}", "ERROR")
         return 1.0
     
     def set_system_volume(self, level):
         """Set system master volume (0.0 to 1.0)"""
         if not self.audio_available or not self.volume_interface:
+            self.log_debug("Cannot set system volume - audio not available", "WARNING")
             return False
         try:
             level = max(0.0, min(1.0, float(level)))
             self.volume_interface.SetMasterVolumeLevelScalar(level, None)
+            self.log_debug(f"Set system volume to: {level}")
             return True
         except Exception as e:
-            print(f"Error setting system volume: {e}")
+            self.log_debug(f"Error setting system volume: {e}", "ERROR")
         return False
     
     def get_system_mute(self):
@@ -211,7 +443,7 @@ class WindowManager:
         try:
             return bool(self.volume_interface.GetMute())
         except Exception as e:
-            pass
+            self.log_debug(f"Error getting system mute: {e}", "ERROR")
         return False
     
     def set_system_mute(self, mute):
@@ -222,7 +454,7 @@ class WindowManager:
             self.volume_interface.SetMute(int(mute), None)
             return True
         except Exception as e:
-            pass
+            self.log_debug(f"Error setting system mute: {e}", "ERROR")
         return False
     
     def toggle_pin(self):
@@ -231,6 +463,16 @@ class WindowManager:
         self.root.attributes('-topmost', is_pinned)
         status = "pinned" if is_pinned else "unpinned"
         self.status_var.set(f"Window {status}")
+    
+    def toggle_debug(self):
+        """Toggle debug mode and export log"""
+        if self.debug_mode.get():
+            self.log_debug("Debug mode enabled")
+            self.status_var.set("Debug mode ON - actions will be logged")
+        else:
+            # Export log when turning off debug mode
+            self.log_debug("Debug mode disabled - exporting log")
+            self.export_debug_log()
     
     def ensure_topmost_during_action(self):
         """Temporarily ensure window is on top during an action"""
@@ -370,6 +612,12 @@ class WindowManager:
         title_label = ttk.Label(header_frame, text="Window Manager", style='Title.TLabel')
         title_label.pack(side=tk.LEFT)
         
+        # Debug checkbox
+        debug_cb = ttk.Checkbutton(header_frame, text="🐛", 
+                                    variable=self.debug_mode,
+                                    command=self.toggle_debug)
+        debug_cb.pack(side=tk.RIGHT, padx=(5, 0))
+        
         pin_cb = ttk.Checkbutton(header_frame, text="📌 Pin", 
                                   variable=self.pin_to_top,
                                   command=self.toggle_pin)
@@ -431,7 +679,9 @@ class WindowManager:
         audio_frame = ttk.Frame(main_frame)
         audio_frame.pack(fill=tk.X, pady=(0, 10))
         
-        ttk.Label(audio_frame, text="Audio:", style='Muted.TLabel').pack(side=tk.LEFT)
+        # Audio status indicator
+        audio_status = "🔊" if self.audio_available else "🔇❌"
+        ttk.Label(audio_frame, text=f"Audio {audio_status}:", style='Muted.TLabel').pack(side=tk.LEFT)
         
         self.bulk_mute_btn = tk.Button(audio_frame, text="🔇 Mute", 
                                         bg=self.colors['card'], fg=self.colors['fg'],
@@ -484,7 +734,7 @@ class WindowManager:
                              lambda e: self.canvas.yview_scroll(int(-1*(e.delta/120)), "units"))
         
         # Status bar
-        self.status_var = tk.StringVar(value="Ready")
+        self.status_var = tk.StringVar(value="Ready" + (" (Audio OK)" if self.audio_available else " (No Audio)"))
         status_bar = ttk.Label(main_frame, textvariable=self.status_var, 
                                style='Muted.TLabel')
         status_bar.pack(fill=tk.X, pady=(10, 0))
@@ -501,6 +751,7 @@ class WindowManager:
             self.update_card_style(hwnd, True)
         self.update_selection_label()
         self.status_var.set("Selected all windows")
+        self.log_debug(f"Selected all {len(self.window_checkboxes)} windows")
     
     def deselect_all(self):
         """Deselect all windows"""
@@ -510,6 +761,7 @@ class WindowManager:
         self.selected_windows.clear()
         self.update_selection_label()
         self.status_var.set("Cleared selection")
+        self.log_debug("Deselected all windows")
     
     def select_monitor(self):
         """Select all windows on the currently selected monitor"""
@@ -531,6 +783,7 @@ class WindowManager:
         
         self.update_selection_label()
         self.status_var.set(f"Selected {count} windows on {target_monitor.split(' (')[0]}")
+        self.log_debug(f"Selected {count} windows on {target_monitor}")
         
     def is_real_window(self, hwnd):
         """Check if a window is a real, visible application window"""
@@ -581,6 +834,8 @@ class WindowManager:
     
     def refresh_windows(self):
         """Refresh the list of windows"""
+        self.log_debug("Refreshing window list...")
+        
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
             
@@ -615,6 +870,7 @@ class WindowManager:
                 
         self.update_selection_label()
         self.status_var.set(f"{len(windows)} windows")
+        self.log_debug(f"Found {len(windows)} windows")
     
     def update_card_style(self, hwnd, selected):
         """Update card visual style based on selection state"""
@@ -772,32 +1028,43 @@ class WindowManager:
             if self.is_window_minimized(hwnd):
                 win32gui.ShowWindow(hwnd, win32con.SW_MAXIMIZE)
                 self.status_var.set("Window maximized")
+                self.log_debug(f"Maximized window {hwnd}")
             else:
                 win32gui.ShowWindow(hwnd, win32con.SW_MINIMIZE)
                 self.status_var.set("Window minimized")
+                self.log_debug(f"Minimized window {hwnd}")
         except Exception as e:
             self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error toggling minmax for {hwnd}: {e}", "ERROR")
     
     def toggle_app_mute(self, hwnd, pid, btn):
         """Toggle mute state for an app"""
+        self.log_debug(f"Toggle mute for PID {pid}")
+        
         if not pid or not self.audio_available:
             self.status_var.set("No audio session for this window")
+            self.log_debug("No audio available or no PID", "WARNING")
             return
             
         current_mute = self.get_app_mute(pid)
         if current_mute is None:
             self.status_var.set("No audio session for this window")
+            self.log_debug(f"No audio session found for PID {pid}", "WARNING")
             return
             
         new_mute = not current_mute
         if self.set_app_mute(pid, new_mute):
             btn.configure(text="🔇" if new_mute else "🔊")
             self.status_var.set("Muted" if new_mute else "Unmuted")
+            self.log_debug(f"Set mute={new_mute} for PID {pid}")
         else:
             self.status_var.set("Failed to toggle mute")
+            self.log_debug(f"Failed to set mute for PID {pid}", "ERROR")
     
     def on_app_volume_press(self, event, hwnd, pid, btn):
         """Handle right-click press on app audio button - show slider"""
+        self.log_debug(f"Volume press for PID {pid}")
+        
         if not pid or not self.audio_available:
             self.status_var.set("No audio session for this window")
             return
@@ -806,6 +1073,8 @@ class WindowManager:
         if current_volume is None:
             self.status_var.set("No audio session for this window")
             return
+        
+        self.log_debug(f"Current app volume: {current_volume}")
         
         def on_change(v):
             self.set_app_volume(pid, v)
@@ -818,10 +1087,12 @@ class WindowManager:
     def on_bulk_volume_press(self, event):
         """Handle right-click press on bulk volume button"""
         selected = self.get_selected_windows()
+        self.log_debug(f"Bulk volume press, {len(selected)} windows selected")
         
         if not selected:
             # No selection - control system volume
             current_volume = self.get_system_volume()
+            self.log_debug(f"System volume: {current_volume}")
             
             def on_change(v):
                 self.set_system_volume(v)
@@ -839,10 +1110,13 @@ class WindowManager:
     
     def on_volume_release(self, event):
         """Handle right-click release - close slider"""
+        self.log_debug("Volume slider released")
         self.close_volume_slider()
     
     def show_volume_slider(self, event, initial_volume, on_change, on_close=None, title="Volume"):
         """Create a floating volume slider window that stays open while right-click is held"""
+        self.log_debug(f"Showing volume slider, initial={initial_volume}, title={title}")
+        
         # Close any existing slider
         self.close_volume_slider()
         
@@ -920,6 +1194,8 @@ class WindowManager:
         # Bind mouse motion to root window for tracking
         self.root.bind('<B3-Motion>', self.on_slider_motion)
         slider_win.bind('<B3-Motion>', self.on_slider_motion)
+        
+        self.log_debug("Volume slider shown")
     
     def on_slider_motion(self, event):
         """Handle mouse motion while slider is open - relative movement"""
@@ -965,7 +1241,7 @@ class WindowManager:
                 self.volume_slider_on_change(new_volume)
                 
         except Exception as e:
-            print(f"Slider motion error: {e}")
+            self.log_debug(f"Slider motion error: {e}", "ERROR")
     
     def close_volume_slider(self):
         """Close the volume slider"""
@@ -1025,10 +1301,12 @@ class WindowManager:
     def bulk_mute(self):
         """Mute selected windows or system"""
         selected = self.get_selected_windows()
+        self.log_debug(f"Bulk mute, {len(selected)} selected")
         
         if not selected:
             if self.set_system_mute(True):
                 self.status_var.set("System muted")
+                self.log_debug("System muted")
             return
         
         count = 0
@@ -1040,14 +1318,17 @@ class WindowManager:
                     self.window_cards[hwnd]['audio_btn'].configure(text="🔇")
         
         self.status_var.set(f"Muted {count} window(s)")
+        self.log_debug(f"Muted {count} windows")
     
     def bulk_unmute(self):
         """Unmute selected windows or system"""
         selected = self.get_selected_windows()
+        self.log_debug(f"Bulk unmute, {len(selected)} selected")
         
         if not selected:
             if self.set_system_mute(False):
                 self.status_var.set("System unmuted")
+                self.log_debug("System unmuted")
             return
         
         count = 0
@@ -1059,6 +1340,7 @@ class WindowManager:
                     self.window_cards[hwnd]['audio_btn'].configure(text="🔊")
         
         self.status_var.set(f"Unmuted {count} window(s)")
+        self.log_debug(f"Unmuted {count} windows")
         
     def on_checkbox_changed(self, hwnd, var):
         """Handle checkbox state change"""
@@ -1082,12 +1364,14 @@ class WindowManager:
     def focus_window(self, hwnd):
         """Focus a window"""
         self.ensure_topmost_during_action()
+        self.log_debug(f"Focusing window {hwnd}")
         try:
             if win32gui.IsIconic(hwnd):
                 win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
             win32gui.SetForegroundWindow(hwnd)
         except Exception as e:
             self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error focusing window {hwnd}: {e}", "ERROR")
             
     def move_to_monitor(self):
         """Move selected windows to chosen monitor"""
@@ -1097,6 +1381,8 @@ class WindowManager:
         if not selected:
             self.status_var.set("No windows selected")
             return
+        
+        self.log_debug(f"Moving {len(selected)} windows to monitor")
             
         monitor_name = self.monitor_var.get()
         target_monitor = None
@@ -1144,9 +1430,10 @@ class WindowManager:
                 moved_count += 1
                 
             except Exception as e:
-                print(f"Error moving window {hwnd}: {e}")
+                self.log_debug(f"Error moving window {hwnd}: {e}", "ERROR")
                 
         self.status_var.set(f"Moved {moved_count} window(s)")
+        self.log_debug(f"Moved {moved_count} windows to {monitor_name}")
     
     def get_target_monitor(self):
         """Get the work area for the selected monitor"""
@@ -1187,8 +1474,10 @@ class WindowManager:
                                    win32con.SWP_SHOWWINDOW)
                                    
             self.status_var.set("Split side by side")
+            self.log_debug("Split windows horizontally")
         except Exception as e:
             self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error splitting windows: {e}", "ERROR")
     
     def split_horizontal(self):
         """Split first two windows top/bottom"""
@@ -1219,11 +1508,14 @@ class WindowManager:
                                    win32con.SWP_SHOWWINDOW)
                                    
             self.status_var.set("Split top/bottom")
+            self.log_debug("Split windows vertically")
         except Exception as e:
             self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error splitting windows: {e}", "ERROR")
     
     def run(self):
         """Run the application"""
+        self.log_debug("Application started")
         self.root.mainloop()
 
 

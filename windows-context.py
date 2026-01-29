@@ -90,7 +90,7 @@ class WindowManager:
         self.window_pids = {}
         # Pinned windows (by hwnd, but we'll also track by title+process for persistence)
         self.pinned_windows = set()  # Current hwnds that are pinned
-        self.pinned_identifiers = set()  # (process, title) tuples for persistence across refresh
+#        self.pinned_identifiers = set()  # (process, title) tuples for persistence across refresh
         
         # Audio state tracking
         self.muted_pids = set()
@@ -152,7 +152,9 @@ class WindowManager:
             settings = {
                 'debug_enabled': self.debug_mode.get(),
                 'verbose_logging': self.verbose_logging,
-                'pinned_identifiers': list(list(x) for x in self.pinned_identifiers)
+                'pinned_identifiers': list(list(x) for x in self.pinned_identifiers),
+                'hotkey_enabled': self.hotkey_enabled.get(),
+                'hotkey_binding': self.hotkey_binding
             }
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(settings, f, indent=2)

@@ -1,4 +1,4 @@
 {
-  "debug_enabled": true,
-  "verbose_logging": true
+  "debug_enabled": false,
+  "verbose_logging": false
 }

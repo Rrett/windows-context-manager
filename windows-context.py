@@ -64,6 +64,12 @@ class WindowManager:
         
         # Load settings
         self.settings = self.load_settings()
+
+        # Pinned windows tracking
+        self.pinned_windows = set()  # Current hwnds that are pinned
+        self.pinned_identifiers = self.settings.get('pinned_identifiers', set())
+        if not isinstance(self.pinned_identifiers, set):
+            self.pinned_identifiers = set()
         
         # Debugging
         self.debug_mode = tk.BooleanVar(value=self.settings.get('debug_enabled', False))
@@ -80,6 +86,9 @@ class WindowManager:
         self.window_cards = {}
         self.windows_list = []
         self.window_pids = {}
+        # Pinned windows (by hwnd, but we'll also track by title+process for persistence)
+        self.pinned_windows = set()  # Current hwnds that are pinned
+        self.pinned_identifiers = set()  # (process, title) tuples for persistence across refresh
         
         # Audio state tracking
         self.muted_pids = set()
@@ -117,17 +126,24 @@ class WindowManager:
         try:
             if os.path.exists(SETTINGS_FILE):
                 with open(SETTINGS_FILE, 'r') as f:
-                    return json.load(f)
+                    settings = json.load(f)
+                    # Convert pinned_identifiers from list of lists to set of tuples
+                    if 'pinned_identifiers' in settings:
+                        settings['pinned_identifiers'] = set(tuple(x) for x in settings['pinned_identifiers'])
+                    else:
+                        settings['pinned_identifiers'] = set()
+                    return settings
         except Exception as e:
             print(f"Error loading settings: {e}")
-        return {'debug_enabled': False, 'verbose_logging': False}
+        return {'debug_enabled': False, 'verbose_logging': False, 'pinned_identifiers': set()}
     
     def save_settings(self):
         """Save settings to file"""
         try:
             settings = {
                 'debug_enabled': self.debug_mode.get(),
-                'verbose_logging': self.verbose_logging
+                'verbose_logging': self.verbose_logging,
+                'pinned_identifiers': list(list(x) for x in self.pinned_identifiers)
             }
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(settings, f, indent=2)
@@ -1357,6 +1373,11 @@ class WindowManager:
         
         def sort_key(item):
             hwnd, title, process, pid = item
+    
+            # Check if pinned (by identifier since hwnd may have changed)
+            window_id = (process, title)
+            is_pinned = window_id in self.pinned_identifiers
+    
             has_audio = pid in audio_pids
             if not has_audio and pid:
                 try:
@@ -1367,8 +1388,12 @@ class WindowManager:
                             break
                 except:
                     pass
-            return (0 if has_audio else 1, process.lower())
-        
+    
+            # Sort order: pinned first, then audio, then alphabetical
+            return (0 if is_pinned else 1, 0 if has_audio else 1, process.lower())
+
+
+
         windows.sort(key=sort_key)
         
         for i, (hwnd, title, process, pid) in enumerate(windows):
@@ -1400,32 +1425,30 @@ class WindowManager:
             return
             
         card_data = self.window_cards[hwnd]
-        card = card_data['card']
-        inner = card_data['inner']
-        left = card_data['left']
-        info = card_data['info']
-        actions = card_data['actions']
-        cb = card_data['checkbox']
-        indicator = card_data['indicator']
         
         if selected:
             bg_color = self.colors['card_selected']
-            indicator.configure(bg=self.colors['checkbox_checked'])
+            card_data['indicator'].configure(bg=self.colors['checkbox_checked'])
         else:
             bg_color = self.colors['card']
-            indicator.configure(bg=self.colors['checkbox_unchecked'])
+            card_data['indicator'].configure(bg=self.colors['checkbox_unchecked'])
         
-        card.configure(bg=bg_color)
-        inner.configure(bg=bg_color)
-        left.configure(bg=bg_color)
-        info.configure(bg=bg_color)
-        actions.configure(bg=bg_color)
-        cb.configure(bg=bg_color, activebackground=bg_color)
+        # Update all widgets
+        for key in ['card', 'inner', 'left', 'fixed_left', 'info', 'actions']:
+            if key in card_data:
+                card_data[key].configure(bg=bg_color)
         
-        for widget in info.winfo_children():
-            widget.configure(bg=bg_color)
+        card_data['checkbox'].configure(bg=bg_color, activebackground=bg_color)
+        card_data['pin_btn'].configure(bg=bg_color)
+        card_data['proc_label'].configure(bg=bg_color)
+        card_data['title_label'].configure(bg=bg_color)
+        
+        for btn in card_data['buttons']:
+            btn.configure(bg=bg_color)
         
         card_data['base_bg'] = bg_color
+
+
     
     def show_monitor_menu(self, event, hwnd):
         """Show dropdown menu for quick monitor switching"""
@@ -1488,8 +1511,15 @@ class WindowManager:
             self.status_var.set(f"Error: {e}")
             self.log_debug(f"Error quick moving window {hwnd}: {e}", "ERROR")
         
+
     def create_window_card(self, hwnd, title, process, pid, was_selected=False, has_audio=False, session_count=0):
         """Create a sleek window card"""
+        # Check if this window should be pinned (from previous session)
+        window_id = (process, title)
+        is_pinned = window_id in self.pinned_identifiers
+        if is_pinned:
+            self.pinned_windows.add(hwnd)
+        
         base_bg = self.colors['card_selected'] if was_selected else self.colors['card']
         
         card = tk.Frame(self.scrollable_frame, bg=base_bg, highlightthickness=0)
@@ -1498,11 +1528,49 @@ class WindowManager:
         inner = tk.Frame(card, bg=base_bg)
         inner.pack(fill=tk.X, padx=10, pady=8)
         
+        # Actions frame FIRST (pack to right) - fixed width so buttons don't get cut off
+        actions = tk.Frame(inner, bg=base_bg)
+        actions.pack(side=tk.RIGHT, padx=(5, 0))
+        # Don't use pack_propagate(False) - let it size naturally
+        
+        btn_style = {'bg': base_bg, 'fg': self.colors['muted'],
+                    'font': ('Segoe UI', 10), 'bd': 0, 'padx': 4, 'pady': 2,
+                    'activebackground': self.colors['card_hover'],
+                    'activeforeground': self.colors['fg'], 'cursor': 'hand2'}
+        
+        monitor_btn = tk.Button(actions, text="◀", width=2, **btn_style)
+        monitor_btn.configure(command=lambda e=None, h=hwnd, b=monitor_btn: self.show_monitor_menu_btn(h, b))
+        monitor_btn.pack(side=tk.LEFT)
+        
+        focus_btn = tk.Button(actions, text="◉", width=2, command=lambda h=hwnd: self.focus_window(h), **btn_style)
+        focus_btn.pack(side=tk.LEFT)
+        
+        minmax_btn = tk.Button(actions, text="□", width=2, command=lambda h=hwnd: self.toggle_minmax(h), **btn_style)
+        minmax_btn.pack(side=tk.LEFT)
+        
+        is_tracked_muted = pid in self.muted_pids
+        if is_tracked_muted:
+            audio_icon = "🔇"
+        else:
+            is_muted = self.get_app_mute(pid, log_lookup=False) if pid and has_audio else False
+            audio_icon = "🔇" if is_muted else "🔊"
+        
+        audio_btn = tk.Button(actions, text=audio_icon, width=2, **btn_style)
+        audio_btn.configure(command=lambda h=hwnd, p=pid, b=audio_btn: self.toggle_app_mute(h, p, b))
+        audio_btn.bind('<ButtonPress-3>', lambda e, h=hwnd, p=pid, b=audio_btn: self.on_app_volume_press(e, h, p, b))
+        audio_btn.bind('<ButtonRelease-3>', self.on_volume_release)
+        audio_btn.pack(side=tk.LEFT)
+        
+        # Left side (will compress as needed)
         left = tk.Frame(inner, bg=base_bg)
         left.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
+        # Fixed width elements container
+        fixed_left = tk.Frame(left, bg=base_bg)
+        fixed_left.pack(side=tk.LEFT)
+        
         indicator_color = self.colors['checkbox_checked'] if was_selected else self.colors['checkbox_unchecked']
-        indicator = tk.Frame(left, bg=indicator_color, width=4, height=32)
+        indicator = tk.Frame(fixed_left, bg=indicator_color, width=4, height=32)
         indicator.pack(side=tk.LEFT, padx=(0, 8))
         indicator.pack_propagate(False)
         
@@ -1510,7 +1578,7 @@ class WindowManager:
         if was_selected:
             self.selected_windows[hwnd] = True
             
-        cb = tk.Checkbutton(left, variable=var, bg=base_bg,
+        cb = tk.Checkbutton(fixed_left, variable=var, bg=base_bg,
                             activebackground=base_bg,
                             selectcolor=self.colors['bg'],
                             command=lambda h=hwnd, v=var: self.on_checkbox_changed(h, v))
@@ -1518,8 +1586,19 @@ class WindowManager:
         
         self.window_checkboxes[hwnd] = var
         
+        # Pin to list button
+        pin_color = self.colors['accent'] if is_pinned else self.colors['muted']
+        pin_btn = tk.Button(fixed_left, text="📌", bg=base_bg, fg=pin_color,
+                            font=('Segoe UI', 9), bd=0, padx=4, pady=0,
+                            activebackground=self.colors['card_hover'],
+                            cursor='hand2')
+        pin_btn.configure(command=lambda h=hwnd, p=process, t=title, b=pin_btn: self.toggle_pin_to_list(h, p, t, b))
+        pin_btn.pack(side=tk.LEFT, padx=(0, 4))
+        
+        # Info section - this is what compresses
         info = tk.Frame(left, bg=base_bg)
-        info.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
+        info.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
+        info.columnconfigure(0, weight=1)
         
         is_tracked_muted = pid in self.muted_pids
         
@@ -1528,51 +1607,25 @@ class WindowManager:
         else:
             audio_indicator = ""
         
+        # Process name - clips with ellipsis
         proc_label = tk.Label(info, text=process + audio_indicator, bg=base_bg,
-                              fg=self.colors['fg'], font=('Segoe UI', 9, 'bold'),
-                              anchor='w')
-        proc_label.pack(fill=tk.X)
+                            fg=self.colors['fg'], font=('Segoe UI', 9, 'bold'),
+                            anchor='w')
+        proc_label.pack(fill=tk.X, anchor='w')
         
-        display_title = title[:35] + "…" if len(title) > 35 else title
+        # Title/subtitle - fully compressible using grid instead of pack
+        display_title = title[:60] + "…" if len(title) > 60 else title
         title_label = tk.Label(info, text=display_title, bg=base_bg,
-                               fg=self.colors['muted'], font=('Segoe UI', 8),
-                               anchor='w')
-        title_label.pack(fill=tk.X)
+                            fg=self.colors['muted'], font=('Segoe UI', 8),
+                            anchor='w')
+        title_label.pack(fill=tk.X, anchor='w')
         
-        actions = tk.Frame(inner, bg=base_bg)
-        actions.pack(side=tk.RIGHT)
-        
-        btn_style = {'bg': base_bg, 'fg': self.colors['muted'],
-                     'font': ('Segoe UI', 10), 'bd': 0, 'padx': 6, 'pady': 2,
-                     'activebackground': self.colors['card_hover'],
-                     'activeforeground': self.colors['fg'], 'cursor': 'hand2'}
-        
-        monitor_btn = tk.Button(actions, text="◀", **btn_style)
-        monitor_btn.configure(command=lambda e=None, h=hwnd, b=monitor_btn: self.show_monitor_menu_btn(h, b))
-        monitor_btn.pack(side=tk.LEFT)
-        
-        focus_btn = tk.Button(actions, text="◉", command=lambda h=hwnd: self.focus_window(h), **btn_style)
-        focus_btn.pack(side=tk.LEFT)
-        
-        minmax_btn = tk.Button(actions, text="□", command=lambda h=hwnd: self.toggle_minmax(h), **btn_style)
-        minmax_btn.pack(side=tk.LEFT)
-        
-        if is_tracked_muted:
-            audio_icon = "🔇"
-        else:
-            is_muted = self.get_app_mute(pid, log_lookup=False) if pid and has_audio else False
-            audio_icon = "🔇" if is_muted else "🔊"
-        
-        audio_btn = tk.Button(actions, text=audio_icon, **btn_style)
-        audio_btn.configure(command=lambda h=hwnd, p=pid, b=audio_btn: self.toggle_app_mute(h, p, b))
-        audio_btn.bind('<ButtonPress-3>', lambda e, h=hwnd, p=pid, b=audio_btn: self.on_app_volume_press(e, h, p, b))
-        audio_btn.bind('<ButtonRelease-3>', self.on_volume_release)
-        audio_btn.pack(side=tk.LEFT)
-        
-        self.window_cards[hwnd] = {
+        # Store reference for dynamic hiding
+        card_data = {
             'card': card,
             'inner': inner,
             'left': left,
+            'fixed_left': fixed_left,
             'info': info,
             'actions': actions,
             'checkbox': cb,
@@ -1580,43 +1633,103 @@ class WindowManager:
             'buttons': [monitor_btn, focus_btn, minmax_btn, audio_btn],
             'audio_btn': audio_btn,
             'monitor_btn': monitor_btn,
+            'pin_btn': pin_btn,
+            'proc_label': proc_label,
+            'title_label': title_label,
             'base_bg': base_bg,
             'pid': pid,
-            'has_audio': has_audio
+            'has_audio': has_audio,
+            'process': process,
+            'title': title
         }
+        
+        self.window_cards[hwnd] = card_data
         
         def on_enter(e):
             current_base = self.window_cards[hwnd]['base_bg']
             hover_bg = self.colors['card_hover'] if current_base == self.colors['card'] else '#243454'
             
-            card.configure(bg=hover_bg)
-            inner.configure(bg=hover_bg)
-            left.configure(bg=hover_bg)
-            info.configure(bg=hover_bg)
-            actions.configure(bg=hover_bg)
-            for widget in info.winfo_children():
+            for widget in [card, inner, left, fixed_left, info, actions]:
                 widget.configure(bg=hover_bg)
+            proc_label.configure(bg=hover_bg)
+            title_label.configure(bg=hover_bg)
             cb.configure(bg=hover_bg, activebackground=hover_bg)
+            pin_btn.configure(bg=hover_bg)
             for btn in self.window_cards[hwnd]['buttons']:
                 btn.configure(bg=hover_bg)
                 
         def on_leave(e):
             current_base = self.window_cards[hwnd]['base_bg']
             
-            card.configure(bg=current_base)
-            inner.configure(bg=current_base)
-            left.configure(bg=current_base)
-            info.configure(bg=current_base)
-            actions.configure(bg=current_base)
-            for widget in info.winfo_children():
+            for widget in [card, inner, left, fixed_left, info, actions]:
                 widget.configure(bg=current_base)
+            proc_label.configure(bg=current_base)
+            title_label.configure(bg=current_base)
             cb.configure(bg=current_base, activebackground=current_base)
+            pin_btn.configure(bg=current_base)
             for btn in self.window_cards[hwnd]['buttons']:
                 btn.configure(bg=current_base)
                 
         card.bind('<Enter>', on_enter)
         card.bind('<Leave>', on_leave)
+        
+        # Bind resize to handle title visibility
+        def on_card_resize(e):
+            # Hide title if card is too narrow
+            card_width = card.winfo_width()
+            if card_width < 280:
+                title_label.pack_forget()
+            else:
+                if not title_label.winfo_ismapped():
+                    title_label.pack(fill=tk.X, anchor='w')
+        
+        card.bind('<Configure>', on_card_resize)
+        #end of create window card
+
+    def toggle_pin_to_list(self, hwnd, process, title, btn):
+        """Toggle whether a window is pinned to the top of the list"""
+        window_id = (process, title)
     
+        if hwnd in self.pinned_windows:
+            # Unpin
+            self.pinned_windows.discard(hwnd)
+            self.pinned_identifiers.discard(window_id)
+            btn.configure(fg=self.colors['muted'])
+            self.status_var.set(f"Unpinned {process}")
+            self.log_debug(f"Unpinned from list: {process} - {title[:30]}")
+        else:
+            # Pin
+            self.pinned_windows.add(hwnd)
+            self.pinned_identifiers.add(window_id)
+            btn.configure(fg=self.colors['accent'])
+            self.status_var.set(f"Pinned {process}")
+            self.log_debug(f"Pinned to list: {process} - {title[:30]}")
+    
+        # Re-sort the list
+        self.resort_window_list()
+
+    #add the resort method here:
+    def resort_window_list(self):
+        """Re-sort window cards with pinned items at top"""
+        # Get all card frames in current order
+        cards_info = []
+        for hwnd, card_data in self.window_cards.items():
+            is_pinned = hwnd in self.pinned_windows
+            has_audio = card_data.get('has_audio', False)
+            process = card_data.get('process', '').lower()
+            cards_info.append((hwnd, card_data['card'], is_pinned, has_audio, process))
+        
+        # Sort: pinned first, then audio, then alphabetical
+        cards_info.sort(key=lambda x: (0 if x[2] else 1, 0 if x[3] else 1, x[4]))
+        
+        # Repack in new order
+        for hwnd, card, is_pinned, has_audio, process in cards_info:
+            card.pack_forget()
+        
+        for hwnd, card, is_pinned, has_audio, process in cards_info:
+            card.pack(fill=tk.X, pady=2, padx=2)
+
+
     def show_monitor_menu_btn(self, hwnd, btn):
         """Show monitor menu positioned relative to button"""
         x = btn.winfo_rootx()

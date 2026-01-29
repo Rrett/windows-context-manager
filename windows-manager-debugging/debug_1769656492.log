@@ -1,0 +1,68 @@
+============================================================
+WINDOW MANAGER DEBUG LOG
+Exported: 2026-01-28 21:14:52
+Unix Timestamp: 1769656492
+============================================================
+
+SYSTEM INFORMATION
+----------------------------------------
+Python Version: 3.13.5 (tags/v3.13.5:6cb20a2, Jun 11 2025, 16:15:46) [MSC v.1943 64 bit (AMD64)]
+OS: Windows
+OS Version: 10.0.26200
+OS Release: 11
+Machine: AMD64
+pycaw Version: unknown
+comtypes Version: 1.4.15
+psutil Version: 7.2.2
+pywin32: installed
+Audio Available: False
+Volume Interface: None
+Monitor Count: 2
+Monitor 1: Display 1 ★ (1920x1080) - 1920x1080
+Monitor 2: Display 2 (1920x1080) - 1920x1080
+Tracked Windows: 8
+
+DEBUG LOG
+----------------------------------------
+[2026-01-28 21:14:05] [INFO] Initializing audio...
+[2026-01-28 21:14:05] [INFO] comtypes imported successfully
+[2026-01-28 21:14:05] [INFO] pycaw imported successfully
+[2026-01-28 21:14:05] [INFO] COM initialized
+[2026-01-28 21:14:05] [INFO] GetSpeakers() returned: <class 'pycaw.utils.AudioDevice'>
+[2026-01-28 21:14:05] [INFO] Speakers object attributes: ['AudioSessionManager', 'EndpointVolume', 'FriendlyName', '__class__', '__delattr__', '__dict__', '__dir__', '__doc__', '__eq__', '__firstlineno__', '__format__', '__ge__', '__getattribute__', '__getstate__', '__gt__', '__hash__', '__init__', '__init_subclass__', '__le__', '__lt__', '__module__', '__ne__', '__new__', '__reduce__', '__reduce_ex__', '__repr__', '__setattr__', '__sizeof__', '__static_attributes__', '__str__', '__subclasshook__', '__weakref__', '_audio_session_manager', '_dev', '_volume', 'id', 'properties', 'state']
+[2026-01-28 21:14:05] [INFO] Trying direct COM approach...
+[2026-01-28 21:14:05] [ERROR] Direct COM approach failed: cannot import name 'CLSID_MMDeviceEnumerator' from 'pycaw.pycaw' (C:\Users\theki\AppData\Roaming\Python\Python313\site-packages\pycaw\pycaw.py)
+[2026-01-28 21:14:05] [ERROR] Traceback (most recent call last):
+  File "C:\Users\theki\Documents\python-scripts-ai\windows-context.py", line 289, in init_audio
+    from pycaw.pycaw import CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, EDataFlow, ERole
+ImportError: cannot import name 'CLSID_MMDeviceEnumerator' from 'pycaw.pycaw' (C:\Users\theki\AppData\Roaming\Python\Python313\site-packages\pycaw\pycaw.py)
+
+[2026-01-28 21:14:05] [INFO] Trying simplest pycaw approach...
+[2026-01-28 21:14:05] [ERROR] All audio initialization methods failed
+[2026-01-28 21:14:05] [INFO] Refreshing window list...
+[2026-01-28 21:14:05] [INFO] Found 8 windows
+[2026-01-28 21:14:05] [INFO] Application started
+[2026-01-28 21:14:09] [INFO] Debug mode enabled
+[2026-01-28 21:14:22] [INFO] Toggle mute for PID 11352
+[2026-01-28 21:14:22] [WARNING] No audio available or no PID
+[2026-01-28 21:14:27] [INFO] Toggle mute for PID 11352
+[2026-01-28 21:14:27] [WARNING] No audio available or no PID
+[2026-01-28 21:14:31] [INFO] Bulk mute, 1 selected
+[2026-01-28 21:14:31] [INFO] Muted 0 windows
+[2026-01-28 21:14:33] [INFO] Bulk unmute, 1 selected
+[2026-01-28 21:14:33] [INFO] Unmuted 0 windows
+[2026-01-28 21:14:36] [INFO] Bulk volume press, 1 windows selected
+[2026-01-28 21:14:36] [INFO] Showing volume slider, initial=1.0, title=1 Apps
+[2026-01-28 21:14:36] [INFO] Volume slider shown
+[2026-01-28 21:14:39] [INFO] Volume slider released
+[2026-01-28 21:14:42] [INFO] Bulk volume press, 1 windows selected
+[2026-01-28 21:14:42] [INFO] Showing volume slider, initial=1.0, title=1 Apps
+[2026-01-28 21:14:42] [INFO] Volume slider shown
+[2026-01-28 21:14:44] [INFO] Volume slider released
+[2026-01-28 21:14:46] [INFO] Bulk unmute, 1 selected
+[2026-01-28 21:14:46] [INFO] Unmuted 0 windows
+[2026-01-28 21:14:46] [INFO] Bulk mute, 1 selected
+[2026-01-28 21:14:46] [INFO] Muted 0 windows
+[2026-01-28 21:14:47] [INFO] Toggle mute for PID 11352
+[2026-01-28 21:14:47] [WARNING] No audio available or no PID
+[2026-01-28 21:14:52] [INFO] Debug mode disabled - exporting log

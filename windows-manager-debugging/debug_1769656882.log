@@ -1,0 +1,543 @@
+============================================================
+WINDOW MANAGER DEBUG LOG
+Exported: 2026-01-28 21:21:22
+Unix Timestamp: 1769656882
+============================================================
+
+SYSTEM INFORMATION
+----------------------------------------
+Python Version: 3.13.5 (tags/v3.13.5:6cb20a2, Jun 11 2025, 16:15:46) [MSC v.1943 64 bit (AMD64)]
+OS: Windows
+OS Version: 10.0.26200
+OS Release: 11
+Machine: AMD64
+pycaw Version: unknown
+pycaw.utils available: True
+comtypes Version: 1.4.15
+psutil Version: 7.2.2
+pywin32: installed
+Audio Available: True
+Volume Interface Type: <class 'comtypes._post_coinit.unknwn.POINTER(IAudioEndpointVolume)'>
+AudioUtilities Type: <class 'type'>
+Monitor Count: 2
+Monitor 1: Display 1 ★ (1920x1080) - 1920x1080
+Monitor 2: Display 2 (1920x1080) - 1920x1080
+Tracked Windows: 8
+
+DEBUG LOG
+----------------------------------------
+[2026-01-28 21:20:52] [INFO] Set system volume to: 1.0
+[2026-01-28 21:20:52] [INFO] Set system volume to: 1.0
+[2026-01-28 21:20:52] [INFO] Set system volume to: 1.0
+[2026-01-28 21:20:52] [INFO] Set system volume to: 1.0
+[2026-01-28 21:20:53] [INFO] Set system volume to: 1.0
+[2026-01-28 21:20:53] [INFO] Set system volume to: 1.0
+[2026-01-28 21:20:53] [INFO] Set system volume to: 1.0
+[2026-01-28 21:20:53] [INFO] Set system volume to: 1.0
+[2026-01-28 21:20:53] [INFO] Set system volume to: 1.0
+[2026-01-28 21:20:53] [INFO] Volume slider released
+[2026-01-28 21:20:54] [INFO] Bulk unmute, 0 selected
+[2026-01-28 21:20:54] [INFO] System unmuted
+[2026-01-28 21:21:00] [INFO] Bulk volume press, 1 windows selected
+[2026-01-28 21:21:00] [INFO] Showing volume slider, initial=1.0, title=1 Apps
+[2026-01-28 21:21:00] [INFO] Volume slider shown
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:00] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:00] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Volume slider released
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 20904
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 9092
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 8144
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 30004
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 9752
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 2676
+[2026-01-28 21:21:01] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:01] [INFO] No audio session found for PID 23544
+[2026-01-28 21:21:03] [INFO] Bulk volume press, 1 windows selected
+[2026-01-28 21:21:03] [INFO] Showing volume slider, initial=1.0, title=1 Apps
+[2026-01-28 21:21:03] [INFO] Volume slider shown
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:03] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:03] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Volume slider released
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 20904
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 9092
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 8144
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 30004
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 9752
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 2676
+[2026-01-28 21:21:04] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:04] [INFO] No audio session found for PID 23544
+[2026-01-28 21:21:08] [INFO] Toggle mute for PID 11352
+[2026-01-28 21:21:08] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:08] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:08] [WARNING] No audio session found for PID 11352
+[2026-01-28 21:21:10] [INFO] Toggle mute for PID 11352
+[2026-01-28 21:21:10] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:10] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:10] [WARNING] No audio session found for PID 11352
+[2026-01-28 21:21:12] [INFO] Bulk mute, 0 selected
+[2026-01-28 21:21:12] [INFO] System muted
+[2026-01-28 21:21:15] [INFO] Bulk unmute, 0 selected
+[2026-01-28 21:21:15] [INFO] System unmuted
+[2026-01-28 21:21:18] [INFO] Bulk mute, 1 selected
+[2026-01-28 21:21:18] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:18] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:18] [INFO] Muted 0 windows
+[2026-01-28 21:21:20] [INFO] Bulk unmute, 1 selected
+[2026-01-28 21:21:20] [INFO] Got 1 audio sessions
+[2026-01-28 21:21:20] [INFO] No audio session found for PID 11352
+[2026-01-28 21:21:20] [INFO] Unmuted 0 windows
+[2026-01-28 21:21:22] [INFO] Debug mode disabled - exporting log

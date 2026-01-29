@@ -77,6 +77,11 @@ class WindowManager:
         # Get monitors
         self.monitors = self.get_monitors()
         
+        # Audio session cache - maps PID to session
+        self.audio_session_cache = {}
+        self.audio_session_cache_time = 0
+        self.CACHE_DURATION = 2.0  # Refresh cache every 2 seconds
+        
         # Initialize audio
         self.init_audio()
         
@@ -175,7 +180,30 @@ class WindowManager:
         
         # Audio status
         info["Audio Available"] = self.audio_available
-        info["Volume Interface"] = str(type(self.volume_interface)) if self.volume_interface else "None"
+        info["Volume Interface Type"] = str(type(self.volume_interface)) if self.volume_interface else "None"
+        
+        # Dump audio session info for debugging
+        if self.AudioUtilities:
+            try:
+                sessions = self.AudioUtilities.GetAllSessions()
+                info["Audio Session Count"] = len(sessions) if sessions else 0
+                for i, session in enumerate(sessions or []):
+                    proc = session.Process
+                    if proc:
+                        info[f"Session {i}"] = f"PID={proc.pid}, Name={proc.name()}"
+                    else:
+                        # Try to get identifier
+                        try:
+                            ctl = session._ctl
+                            if hasattr(ctl, 'GetDisplayName'):
+                                name = ctl.GetDisplayName()
+                                info[f"Session {i}"] = f"No Process, DisplayName={name}"
+                            else:
+                                info[f"Session {i}"] = "No Process, No DisplayName"
+                        except:
+                            info[f"Session {i}"] = "No Process info available"
+            except Exception as e:
+                info["Audio Session Error"] = str(e)
         
         # Monitor info
         info["Monitor Count"] = len(self.monitors)
@@ -191,233 +219,268 @@ class WindowManager:
         """Initialize audio control via pycaw"""
         self.audio_available = False
         self.volume_interface = None
+        self.AudioUtilities = None
+        self.ISimpleAudioVolume = None
         
         self.log_debug("Initializing audio...")
         
         try:
-            from comtypes import CLSCTX_ALL, CoInitialize, CoCreateInstance, GUID
-            from ctypes import cast, POINTER
-            
-            self.log_debug("comtypes imported successfully")
-            
-            # Try to import pycaw
+            # Import pycaw modules
             try:
-                from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume, IAudioEndpointVolume
+                from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
                 self.AudioUtilities = AudioUtilities
                 self.ISimpleAudioVolume = ISimpleAudioVolume
-                self.IAudioEndpointVolume = IAudioEndpointVolume
-                self.log_debug("pycaw imported successfully")
-            except ImportError as e:
-                self.log_debug(f"Failed to import pycaw: {e}", "ERROR")
-                return
+                self.log_debug("Imported from pycaw.pycaw")
+            except ImportError:
+                try:
+                    from pycaw import AudioUtilities, ISimpleAudioVolume
+                    self.AudioUtilities = AudioUtilities
+                    self.ISimpleAudioVolume = ISimpleAudioVolume
+                    self.log_debug("Imported from pycaw")
+                except ImportError as e:
+                    self.log_debug(f"Failed to import AudioUtilities: {e}", "ERROR")
+                    return
             
-            self.CLSCTX_ALL = CLSCTX_ALL
-            self.cast = cast
-            self.POINTER = POINTER
-            
-            # Initialize COM
-            try:
-                CoInitialize()
-                self.log_debug("COM initialized")
-            except Exception as e:
-                self.log_debug(f"COM already initialized or error: {e}", "WARNING")
-            
-            # Get speakers device - try multiple methods
-            speakers = None
-            
-            # Method 1: Try GetSpeakers()
-            try:
-                speakers = AudioUtilities.GetSpeakers()
-                self.log_debug(f"GetSpeakers() returned: {type(speakers)}")
-                self.log_debug(f"Speakers object attributes: {dir(speakers)}")
-            except Exception as e:
-                self.log_debug(f"GetSpeakers() failed: {e}", "ERROR")
+            # Get speakers device
+            speakers = self.AudioUtilities.GetSpeakers()
+            self.log_debug(f"GetSpeakers() returned: {type(speakers)}")
             
             if speakers is None:
-                self.log_debug("Could not get speakers device", "ERROR")
+                self.log_debug("GetSpeakers() returned None", "ERROR")
                 return
             
-            # Try to activate the volume interface
-            # Method 1: Direct Activate call (older pycaw)
-            try:
-                if hasattr(speakers, 'Activate'):
-                    self.log_debug("Trying speakers.Activate()...")
+            # NEW PYCAW API: AudioDevice has EndpointVolume as a property
+            if hasattr(speakers, 'EndpointVolume'):
+                self.log_debug("Found EndpointVolume property (new pycaw API)")
+                try:
+                    self.volume_interface = speakers.EndpointVolume
+                    
+                    # Test if it works
+                    test_vol = self.volume_interface.GetMasterVolumeLevelScalar()
+                    self.log_debug(f"Test read volume: {test_vol}")
+                    
+                    self.audio_available = True
+                    self.log_debug("Audio initialized via EndpointVolume property", "SUCCESS")
+                    return
+                except Exception as e:
+                    self.log_debug(f"EndpointVolume property failed: {e}", "ERROR")
+                    self.log_debug(traceback.format_exc(), "ERROR")
+            
+            # Try _volume attribute (another variant)
+            if hasattr(speakers, '_volume'):
+                self.log_debug("Found _volume attribute")
+                try:
+                    self.volume_interface = speakers._volume
+                    test_vol = self.volume_interface.GetMasterVolumeLevelScalar()
+                    self.log_debug(f"Test read volume via _volume: {test_vol}")
+                    self.audio_available = True
+                    self.log_debug("Audio initialized via _volume attribute", "SUCCESS")
+                    return
+                except Exception as e:
+                    self.log_debug(f"_volume attribute failed: {e}", "ERROR")
+            
+            # Fallback: Try older Activate method
+            if hasattr(speakers, 'Activate'):
+                self.log_debug("Trying Activate() method (old API)")
+                try:
+                    from comtypes import CLSCTX_ALL
+                    from ctypes import cast, POINTER
+                    from pycaw.pycaw import IAudioEndpointVolume
+                    
                     interface = speakers.Activate(
                         IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
                     self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
                     self.audio_available = True
                     self.log_debug("Audio initialized via Activate()", "SUCCESS")
                     return
-            except Exception as e:
-                self.log_debug(f"Activate() method failed: {e}", "WARNING")
+                except Exception as e:
+                    self.log_debug(f"Activate() failed: {e}", "ERROR")
             
-            # Method 2: Try using the endpoint directly (newer pycaw)
-            try:
-                if hasattr(speakers, '_endpoint'):
-                    self.log_debug("Trying speakers._endpoint.Activate()...")
-                    endpoint = speakers._endpoint
-                    self.log_debug(f"Endpoint type: {type(endpoint)}")
-                    self.log_debug(f"Endpoint attributes: {dir(endpoint)}")
+            # Try accessing through _dev
+            if hasattr(speakers, '_dev'):
+                self.log_debug("Trying _dev attribute")
+                try:
+                    dev = speakers._dev
                     
-                    interface = endpoint.Activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                    self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
-                    self.audio_available = True
-                    self.log_debug("Audio initialized via _endpoint.Activate()", "SUCCESS")
-                    return
-            except Exception as e:
-                self.log_debug(f"_endpoint.Activate() failed: {e}", "WARNING")
+                    if hasattr(dev, 'Activate'):
+                        from comtypes import CLSCTX_ALL
+                        from ctypes import cast, POINTER
+                        from pycaw.pycaw import IAudioEndpointVolume
+                        
+                        interface = dev.Activate(
+                            IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
+                        self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+                        
+                        test_vol = self.volume_interface.GetMasterVolumeLevelScalar()
+                        self.log_debug(f"Test volume via _dev: {test_vol}")
+                        
+                        self.audio_available = True
+                        self.log_debug("Audio initialized via _dev.Activate()", "SUCCESS")
+                        return
+                except Exception as e:
+                    self.log_debug(f"_dev approach failed: {e}", "ERROR")
+                    self.log_debug(traceback.format_exc(), "ERROR")
             
-            # Method 3: Try GetEndpoint() (another pycaw variant)
-            try:
-                if hasattr(speakers, 'GetEndpoint'):
-                    self.log_debug("Trying speakers.GetEndpoint()...")
-                    endpoint = speakers.GetEndpoint()
-                    interface = endpoint.Activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                    self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
-                    self.audio_available = True
-                    self.log_debug("Audio initialized via GetEndpoint()", "SUCCESS")
-                    return
-            except Exception as e:
-                self.log_debug(f"GetEndpoint() failed: {e}", "WARNING")
-            
-            # Method 4: Direct COM approach
-            try:
-                self.log_debug("Trying direct COM approach...")
-                from comtypes import CLSCTX_ALL
-                from pycaw.pycaw import CLSID_MMDeviceEnumerator, IMMDeviceEnumerator, EDataFlow, ERole
-                
-                # Create device enumerator
-                enumerator = CoCreateInstance(
-                    CLSID_MMDeviceEnumerator,
-                    IMMDeviceEnumerator,
-                    CLSCTX_ALL
-                )
-                self.log_debug(f"Device enumerator created: {type(enumerator)}")
-                
-                # Get default audio endpoint
-                device = enumerator.GetDefaultAudioEndpoint(EDataFlow.eRender.value, ERole.eMultimedia.value)
-                self.log_debug(f"Default endpoint obtained: {type(device)}")
-                
-                # Activate volume interface
-                interface = device.Activate(
-                    IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
-                self.audio_available = True
-                self.log_debug("Audio initialized via direct COM", "SUCCESS")
-                return
-                
-            except Exception as e:
-                self.log_debug(f"Direct COM approach failed: {e}", "ERROR")
-                self.log_debug(traceback.format_exc(), "ERROR")
-            
-            # Method 5: Simplest pycaw approach
-            try:
-                self.log_debug("Trying simplest pycaw approach...")
-                from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-                from comtypes import cast, POINTER, CLSCTX_ALL
-                
-                devices = AudioUtilities.GetSpeakers()
-                
-                # Check if it's wrapped
-                if hasattr(devices, 'activate'):
-                    self.log_debug("Using lowercase activate()...")
-                    interface = devices.activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                    self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
-                    self.audio_available = True
-                    self.log_debug("Audio initialized via activate()", "SUCCESS")
-                    return
-                    
-            except Exception as e:
-                self.log_debug(f"Simplest approach failed: {e}", "ERROR")
-            
-            self.log_debug("All audio initialization methods failed", "ERROR")
+            self.log_debug("All audio initialization methods exhausted", "ERROR")
             
         except ImportError as e:
             self.log_debug(f"Import error: {e}", "ERROR")
-            print(f"pycaw/comtypes not available - audio control disabled: {e}")
-            print("Install with: pip install pycaw comtypes")
+            self.log_debug(traceback.format_exc(), "ERROR")
         except Exception as e:
             self.log_debug(f"Unexpected error initializing audio: {e}", "ERROR")
             self.log_debug(traceback.format_exc(), "ERROR")
     
-    def get_audio_session_for_pid(self, pid):
-        """Get audio session for a specific process ID"""
-        if not self.audio_available:
-            return None
+    def refresh_audio_session_cache(self):
+        """Refresh the audio session cache"""
+        current_time = time.time()
+        if current_time - self.audio_session_cache_time < self.CACHE_DURATION:
+            return  # Cache is still fresh
+        
+        self.audio_session_cache.clear()
+        self.audio_session_cache_time = current_time
+        
+        if not self.AudioUtilities:
+            return
+        
         try:
             sessions = self.AudioUtilities.GetAllSessions()
+            if not sessions:
+                self.log_debug("No audio sessions found")
+                return
+            
+            session_info = []
             for session in sessions:
-                if session.Process and session.Process.pid == pid:
-                    return session
+                proc = session.Process
+                if proc:
+                    pid = proc.pid
+                    self.audio_session_cache[pid] = session
+                    session_info.append(f"{proc.name()}(PID:{pid})")
+                else:
+                    # Try to handle sessions without Process
+                    # Some apps use a different process for audio
+                    session_info.append("(no process)")
+            
+            self.log_debug(f"Audio sessions: {', '.join(session_info)}")
+            
         except Exception as e:
-            self.log_debug(f"Error getting audio session for PID {pid}: {e}", "WARNING")
+            self.log_debug(f"Error refreshing audio cache: {e}", "ERROR")
+    
+    def get_audio_session_for_pid(self, pid):
+        """Get audio session for a specific process ID"""
+        if not self.AudioUtilities or not pid:
+            return None
+        
+        self.refresh_audio_session_cache()
+        
+        # Direct PID match
+        if pid in self.audio_session_cache:
+            return self.audio_session_cache[pid]
+        
+        # Try to find by process tree (child processes)
+        try:
+            proc = psutil.Process(pid)
+            # Check parent
+            parent = proc.parent()
+            if parent and parent.pid in self.audio_session_cache:
+                return self.audio_session_cache[parent.pid]
+            
+            # Check children
+            for child in proc.children(recursive=True):
+                if child.pid in self.audio_session_cache:
+                    return self.audio_session_cache[child.pid]
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+        
         return None
     
     def get_app_volume(self, pid):
         """Get volume level for an app (0.0 to 1.0)"""
-        if not self.audio_available:
-            return None
         session = self.get_audio_session_for_pid(pid)
-        if session:
-            try:
+        if not session:
+            return None
+        
+        try:
+            # Try SimpleAudioVolume interface
+            if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
+                return session.SimpleAudioVolume.GetMasterVolume()
+            
+            # Try _ctl.QueryInterface
+            if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
                 volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
                 return volume_interface.GetMasterVolume()
-            except Exception as e:
-                self.log_debug(f"Error getting app volume for PID {pid}: {e}", "WARNING")
+        except Exception as e:
+            self.log_debug(f"Error getting app volume for PID {pid}: {e}", "WARNING")
         return None
     
     def set_app_volume(self, pid, level):
         """Set volume level for an app (0.0 to 1.0)"""
-        if not self.audio_available:
-            return False
         session = self.get_audio_session_for_pid(pid)
-        if session:
-            try:
-                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
-                volume_interface.SetMasterVolume(float(level), None)
+        if not session:
+            return False
+        
+        try:
+            level = max(0.0, min(1.0, float(level)))
+            
+            # Try SimpleAudioVolume interface
+            if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
+                session.SimpleAudioVolume.SetMasterVolume(level, None)
                 return True
-            except Exception as e:
-                self.log_debug(f"Error setting app volume for PID {pid}: {e}", "WARNING")
+            
+            # Try _ctl.QueryInterface
+            if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
+                volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
+                volume_interface.SetMasterVolume(level, None)
+                return True
+        except Exception as e:
+            self.log_debug(f"Error setting app volume for PID {pid}: {e}", "WARNING")
         return False
     
     def get_app_mute(self, pid):
         """Get mute state for an app"""
-        if not self.audio_available:
-            return None
         session = self.get_audio_session_for_pid(pid)
-        if session:
-            try:
+        if not session:
+            return None
+        
+        try:
+            # Try SimpleAudioVolume interface
+            if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
+                return bool(session.SimpleAudioVolume.GetMute())
+            
+            # Try _ctl.QueryInterface
+            if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
                 volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
                 return bool(volume_interface.GetMute())
-            except Exception as e:
-                self.log_debug(f"Error getting app mute for PID {pid}: {e}", "WARNING")
+        except Exception as e:
+            self.log_debug(f"Error getting app mute for PID {pid}: {e}", "WARNING")
         return None
     
     def set_app_mute(self, pid, mute):
         """Set mute state for an app"""
-        if not self.audio_available:
-            return False
         session = self.get_audio_session_for_pid(pid)
-        if session:
-            try:
+        if not session:
+            return False
+        
+        try:
+            # Try SimpleAudioVolume interface
+            if hasattr(session, 'SimpleAudioVolume') and session.SimpleAudioVolume:
+                session.SimpleAudioVolume.SetMute(int(mute), None)
+                return True
+            
+            # Try _ctl.QueryInterface
+            if hasattr(session, '_ctl') and self.ISimpleAudioVolume:
                 volume_interface = session._ctl.QueryInterface(self.ISimpleAudioVolume)
                 volume_interface.SetMute(int(mute), None)
                 return True
-            except Exception as e:
-                self.log_debug(f"Error setting app mute for PID {pid}: {e}", "WARNING")
+        except Exception as e:
+            self.log_debug(f"Error setting app mute for PID {pid}: {e}", "WARNING")
         return False
     
     def get_system_volume(self):
         """Get system master volume (0.0 to 1.0)"""
         if not self.audio_available or not self.volume_interface:
-            self.log_debug("Cannot get system volume - audio not available", "WARNING")
             return 1.0
         try:
-            vol = self.volume_interface.GetMasterVolumeLevelScalar()
-            self.log_debug(f"Got system volume: {vol}")
-            return vol
+            return self.volume_interface.GetMasterVolumeLevelScalar()
         except Exception as e:
             self.log_debug(f"Error getting system volume: {e}", "ERROR")
         return 1.0
@@ -425,12 +488,10 @@ class WindowManager:
     def set_system_volume(self, level):
         """Set system master volume (0.0 to 1.0)"""
         if not self.audio_available or not self.volume_interface:
-            self.log_debug("Cannot set system volume - audio not available", "WARNING")
             return False
         try:
             level = max(0.0, min(1.0, float(level)))
             self.volume_interface.SetMasterVolumeLevelScalar(level, None)
-            self.log_debug(f"Set system volume to: {level}")
             return True
         except Exception as e:
             self.log_debug(f"Error setting system volume: {e}", "ERROR")
@@ -849,6 +910,10 @@ class WindowManager:
         
         self.monitors = self.get_monitors()
         
+        # Force refresh audio session cache
+        self.audio_session_cache_time = 0
+        self.refresh_audio_session_cache()
+        
         def enum_callback(hwnd, windows):
             if self.is_real_window(hwnd):
                 title = win32gui.GetWindowText(hwnd)
@@ -938,7 +1003,11 @@ class WindowManager:
         info = tk.Frame(left, bg=base_bg)
         info.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(5, 0))
         
-        proc_label = tk.Label(info, text=process, bg=base_bg,
+        # Check if this app has an audio session
+        has_audio = pid in self.audio_session_cache
+        audio_indicator = " 🔊" if has_audio else ""
+        
+        proc_label = tk.Label(info, text=process + audio_indicator, bg=base_bg,
                               fg=self.colors['fg'], font=('Segoe UI', 9, 'bold'),
                               anchor='w')
         proc_label.pack(fill=tk.X)
@@ -1041,15 +1110,14 @@ class WindowManager:
         """Toggle mute state for an app"""
         self.log_debug(f"Toggle mute for PID {pid}")
         
-        if not pid or not self.audio_available:
-            self.status_var.set("No audio session for this window")
-            self.log_debug("No audio available or no PID", "WARNING")
+        if not pid:
+            self.status_var.set("No PID for this window")
             return
             
         current_mute = self.get_app_mute(pid)
         if current_mute is None:
-            self.status_var.set("No audio session for this window")
-            self.log_debug(f"No audio session found for PID {pid}", "WARNING")
+            self.status_var.set("No audio session for this app")
+            self.log_debug(f"No audio session for PID {pid}", "WARNING")
             return
             
         new_mute = not current_mute
@@ -1063,23 +1131,22 @@ class WindowManager:
     
     def on_app_volume_press(self, event, hwnd, pid, btn):
         """Handle right-click press on app audio button - show slider"""
-        self.log_debug(f"Volume press for PID {pid}")
-        
-        if not pid or not self.audio_available:
-            self.status_var.set("No audio session for this window")
+        if not pid:
+            self.status_var.set("No audio session for this app")
             return
             
         current_volume = self.get_app_volume(pid)
         if current_volume is None:
-            self.status_var.set("No audio session for this window")
+            self.status_var.set("No audio session for this app")
             return
         
-        self.log_debug(f"Current app volume: {current_volume}")
+        self.log_debug(f"Opening volume slider for PID {pid}, current volume: {current_volume:.0%}")
         
         def on_change(v):
             self.set_app_volume(pid, v)
         
-        def on_close():
+        def on_close(final_vol):
+            self.log_debug(f"Volume slider closed for PID {pid}, final volume: {final_vol:.0%}")
             self.update_audio_btn(hwnd, pid, btn)
         
         self.show_volume_slider(event, current_volume, on_change, on_close, "App Volume")
@@ -1087,36 +1154,38 @@ class WindowManager:
     def on_bulk_volume_press(self, event):
         """Handle right-click press on bulk volume button"""
         selected = self.get_selected_windows()
-        self.log_debug(f"Bulk volume press, {len(selected)} windows selected")
         
         if not selected:
             # No selection - control system volume
             current_volume = self.get_system_volume()
-            self.log_debug(f"System volume: {current_volume}")
+            self.log_debug(f"Opening system volume slider, current: {current_volume:.0%}")
             
             def on_change(v):
                 self.set_system_volume(v)
             
-            self.show_volume_slider(event, current_volume, on_change, None, "System")
+            def on_close(final_vol):
+                self.log_debug(f"System volume slider closed, final volume: {final_vol:.0%}")
+            
+            self.show_volume_slider(event, current_volume, on_change, on_close, "System")
         else:
-            # Control selected windows - start at 100%
+            # Control selected windows
+            self.log_debug(f"Opening bulk volume slider for {len(selected)} apps")
+            
             def on_change(v):
                 self.set_selected_volumes(v)
             
-            def on_close():
+            def on_close(final_vol):
+                self.log_debug(f"Bulk volume slider closed for {len(selected)} apps, final volume: {final_vol:.0%}")
                 self.update_all_audio_btns()
             
             self.show_volume_slider(event, 1.0, on_change, on_close, f"{len(selected)} Apps")
     
     def on_volume_release(self, event):
         """Handle right-click release - close slider"""
-        self.log_debug("Volume slider released")
         self.close_volume_slider()
     
     def show_volume_slider(self, event, initial_volume, on_change, on_close=None, title="Volume"):
         """Create a floating volume slider window that stays open while right-click is held"""
-        self.log_debug(f"Showing volume slider, initial={initial_volume}, title={title}")
-        
         # Close any existing slider
         self.close_volume_slider()
         
@@ -1194,8 +1263,6 @@ class WindowManager:
         # Bind mouse motion to root window for tracking
         self.root.bind('<B3-Motion>', self.on_slider_motion)
         slider_win.bind('<B3-Motion>', self.on_slider_motion)
-        
-        self.log_debug("Volume slider shown")
     
     def on_slider_motion(self, event):
         """Handle mouse motion while slider is open - relative movement"""
@@ -1236,7 +1303,7 @@ class WindowManager:
             # Update label
             self.vol_var.set(f"{int(new_volume * 100)}%")
             
-            # Apply volume change
+            # Apply volume change (no logging here - too verbose)
             if self.volume_slider_on_change:
                 self.volume_slider_on_change(new_volume)
                 
@@ -1251,10 +1318,13 @@ class WindowManager:
         except:
             pass
         
-        # Call on_close callback if set
+        # Get final volume for logging
+        final_volume = self.current_slider_volume if self.current_slider_volume is not None else 1.0
+        
+        # Call on_close callback if set (with final volume)
         if hasattr(self, 'volume_slider_on_close') and self.volume_slider_on_close:
             try:
-                self.volume_slider_on_close()
+                self.volume_slider_on_close(final_volume)
             except:
                 pass
             self.volume_slider_on_close = None

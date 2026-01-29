@@ -1,7 +1,7 @@
 import tkinter as tk
 from tkinter import ttk
 import ctypes
-from ctypes import wintypes
+from ctypes import wintypes, cast, POINTER
 import win32gui
 import win32con
 import win32process
@@ -243,39 +243,50 @@ class WindowManager:
         self.volume_interface = None
         self.AudioUtilities = None
         self.ISimpleAudioVolume = None
+        self.IAudioEndpointVolume = None
+        self._speakers = None  # Keep reference to speakers device
         
         self.log_debug("Initializing audio...")
         
         try:
             # Import pycaw modules
             try:
-                from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume
+                from pycaw.pycaw import AudioUtilities, ISimpleAudioVolume, IAudioEndpointVolume
                 self.AudioUtilities = AudioUtilities
                 self.ISimpleAudioVolume = ISimpleAudioVolume
+                self.IAudioEndpointVolume = IAudioEndpointVolume
                 self.log_debug("Imported from pycaw.pycaw")
             except ImportError:
                 try:
-                    from pycaw import AudioUtilities, ISimpleAudioVolume
+                    from pycaw import AudioUtilities, ISimpleAudioVolume, IAudioEndpointVolume
                     self.AudioUtilities = AudioUtilities
                     self.ISimpleAudioVolume = ISimpleAudioVolume
+                    self.IAudioEndpointVolume = IAudioEndpointVolume
                     self.log_debug("Imported from pycaw")
                 except ImportError as e:
                     self.log_debug(f"Failed to import AudioUtilities: {e}", "ERROR")
                     return
             
-            # Get speakers device
-            speakers = self.AudioUtilities.GetSpeakers()
-            self.log_debug(f"GetSpeakers() returned: {type(speakers)}")
+            # Import comtypes for CLSCTX_ALL
+            try:
+                from comtypes import CLSCTX_ALL
+                self.CLSCTX_ALL = CLSCTX_ALL
+            except ImportError:
+                self.CLSCTX_ALL = 0x17  # Fallback value
             
-            if speakers is None:
+            # Get speakers device - keep reference
+            self._speakers = self.AudioUtilities.GetSpeakers()
+            self.log_debug(f"GetSpeakers() returned: {type(self._speakers)}")
+            
+            if self._speakers is None:
                 self.log_debug("GetSpeakers() returned None", "ERROR")
                 return
             
             # Try EndpointVolume property (new pycaw API)
-            if hasattr(speakers, 'EndpointVolume'):
+            if hasattr(self._speakers, 'EndpointVolume'):
                 self.log_debug("Found EndpointVolume property (new pycaw API)")
                 try:
-                    self.volume_interface = speakers.EndpointVolume
+                    self.volume_interface = self._speakers.EndpointVolume
                     test_vol = self.volume_interface.GetMasterVolumeLevelScalar()
                     self.log_debug(f"Test read volume: {test_vol}")
                     self.audio_available = True
@@ -285,10 +296,10 @@ class WindowManager:
                     self.log_debug(f"EndpointVolume property failed: {e}", "ERROR")
             
             # Try _volume attribute
-            if hasattr(speakers, '_volume'):
+            if hasattr(self._speakers, '_volume'):
                 self.log_debug("Found _volume attribute")
                 try:
-                    self.volume_interface = speakers._volume
+                    self.volume_interface = self._speakers._volume
                     test_vol = self.volume_interface.GetMasterVolumeLevelScalar()
                     self.log_debug(f"Test read volume via _volume: {test_vol}")
                     self.audio_available = True
@@ -298,16 +309,14 @@ class WindowManager:
                     self.log_debug(f"_volume attribute failed: {e}", "ERROR")
             
             # Fallback: Try older Activate method
-            if hasattr(speakers, 'Activate'):
+            if hasattr(self._speakers, 'Activate'):
                 self.log_debug("Trying Activate() method (old API)")
                 try:
-                    from comtypes import CLSCTX_ALL
-                    from ctypes import cast, POINTER
-                    from pycaw.pycaw import IAudioEndpointVolume
-                    
-                    interface = speakers.Activate(
-                        IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-                    self.volume_interface = cast(interface, POINTER(IAudioEndpointVolume))
+                    interface = self._speakers.Activate(
+                        self.IAudioEndpointVolume._iid_, self.CLSCTX_ALL, None)
+                    self.volume_interface = cast(interface, POINTER(self.IAudioEndpointVolume))
+                    test_vol = self.volume_interface.GetMasterVolumeLevelScalar()
+                    self.log_debug(f"Test read volume via Activate: {test_vol}")
                     self.audio_available = True
                     self.log_debug("Audio initialized via Activate()", "SUCCESS")
                     return
@@ -320,6 +329,7 @@ class WindowManager:
             self.log_debug(f"Import error: {e}", "ERROR")
         except Exception as e:
             self.log_debug(f"Unexpected error initializing audio: {e}", "ERROR")
+            self.log_debug(traceback.format_exc(), "ERROR")
     
     def get_fresh_audio_sessions(self):
         """Get fresh audio sessions - don't cache COM objects"""
@@ -348,6 +358,14 @@ class WindowManager:
         
         sessions = self.get_fresh_audio_sessions()
         
+        # Log what sessions we found for debugging
+        session_pids = list(sessions.keys())
+        if session_pids:
+            session_info = ", ".join([f"{p}" for p in session_pids])
+            self.log_debug(f"Audio sessions: {session_info}")
+        else:
+            self.log_debug("Audio sessions: (no process)")
+        
         # Direct PID match
         if pid in sessions:
             return sessions[pid]
@@ -358,11 +376,13 @@ class WindowManager:
             # Check parent
             parent = proc.parent()
             if parent and parent.pid in sessions:
+                self.log_debug(f"Found audio via parent PID {parent.pid}")
                 return sessions[parent.pid]
             
             # Check children
             for child in proc.children(recursive=True):
                 if child.pid in sessions:
+                    self.log_debug(f"Found audio via child PID {child.pid}")
                     return sessions[child.pid]
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             pass
@@ -454,16 +474,27 @@ class WindowManager:
     def get_system_volume(self):
         """Get system master volume (0.0 to 1.0)"""
         if not self.audio_available or not self.volume_interface:
+            self.log_debug("System volume unavailable - no interface", "WARNING")
             return 1.0
         try:
-            return self.volume_interface.GetMasterVolumeLevelScalar()
+            vol = self.volume_interface.GetMasterVolumeLevelScalar()
+            return vol
         except Exception as e:
             self.log_debug(f"Error getting system volume: {e}", "ERROR")
+            # Try to reinitialize
+            self.log_debug("Attempting to reinitialize audio...", "INFO")
+            self.init_audio()
+            if self.volume_interface:
+                try:
+                    return self.volume_interface.GetMasterVolumeLevelScalar()
+                except:
+                    pass
         return 1.0
     
     def set_system_volume(self, level):
         """Set system master volume (0.0 to 1.0)"""
         if not self.audio_available or not self.volume_interface:
+            self.log_debug("Cannot set system volume - no interface", "WARNING")
             return False
         try:
             level = max(0.0, min(1.0, float(level)))
@@ -471,6 +502,14 @@ class WindowManager:
             return True
         except Exception as e:
             self.log_debug(f"Error setting system volume: {e}", "ERROR")
+            # Try to reinitialize
+            self.init_audio()
+            if self.volume_interface:
+                try:
+                    self.volume_interface.SetMasterVolumeLevelScalar(level, None)
+                    return True
+                except:
+                    pass
         return False
     
     def get_system_mute(self):
@@ -619,6 +658,7 @@ class WindowManager:
         for i, mon in enumerate(monitors):
             primary_tag = " ★" if mon['is_primary'] else ""
             mon['name'] = f"Display {i + 1}{primary_tag} ({mon['resolution']})"
+            mon['short_name'] = f"Display {i + 1}{primary_tag}"
             
         return monitors
 
@@ -636,6 +676,21 @@ class WindowManager:
         except:
             pass
         return None
+    
+    def get_window_monitor_index(self, hwnd):
+        """Get the index of the monitor a window is on"""
+        try:
+            rect = win32gui.GetWindowRect(hwnd)
+            center_x = (rect[0] + rect[2]) // 2
+            center_y = (rect[1] + rect[3]) // 2
+            
+            for i, mon in enumerate(self.monitors):
+                ma = mon['monitor_area']
+                if ma[0] <= center_x < ma[2] and ma[1] <= center_y < ma[3]:
+                    return i
+        except:
+            pass
+        return 0
         
     def setup_ui(self):
         """Setup the user interface"""
@@ -873,6 +928,9 @@ class WindowManager:
         """Refresh the list of windows"""
         self.log_debug("Refreshing window list...")
         
+        # Refresh monitors too
+        self.monitors = self.get_monitors()
+        
         for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
             
@@ -883,8 +941,6 @@ class WindowManager:
         
         old_selection = list(self.selected_windows.keys())
         self.selected_windows.clear()
-        
-        self.monitors = self.get_monitors()
         
         # Get current audio sessions for display
         audio_sessions = self.get_fresh_audio_sessions()
@@ -957,6 +1013,70 @@ class WindowManager:
             widget.configure(bg=bg_color)
         
         card_data['base_bg'] = bg_color
+    
+    def show_monitor_menu(self, event, hwnd):
+        """Show dropdown menu for quick monitor switching"""
+        menu = tk.Menu(self.root, tearoff=0, bg=self.colors['card'], fg=self.colors['fg'],
+                       activebackground=self.colors['accent'], activeforeground='white',
+                       font=('Segoe UI', 9))
+        
+        current_monitor_idx = self.get_window_monitor_index(hwnd)
+        
+        for i, mon in enumerate(self.monitors):
+            if i == current_monitor_idx:
+                # Current monitor - greyed out with star
+                menu.add_command(label=f"★ {mon['short_name']}", state='disabled')
+            else:
+                # Other monitors - clickable
+                menu.add_command(label=f"  {mon['short_name']}", 
+                               command=lambda h=hwnd, m=mon: self.quick_move_to_monitor(h, m))
+        
+        # Show menu at button position
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+    
+    def quick_move_to_monitor(self, hwnd, target_monitor):
+        """Quickly move a single window to a specific monitor"""
+        self.ensure_topmost_during_action()
+        self.log_debug(f"Quick moving window {hwnd} to {target_monitor['short_name']}")
+        
+        work_area = target_monitor['work_area']
+        mon_x, mon_y = work_area[0], work_area[1]
+        mon_width = work_area[2] - work_area[0]
+        mon_height = work_area[3] - work_area[1]
+        
+        try:
+            rect = win32gui.GetWindowRect(hwnd)
+            win_width = rect[2] - rect[0]
+            win_height = rect[3] - rect[1]
+            
+            if self.is_window_maximized(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                rect = win32gui.GetWindowRect(hwnd)
+                win_width = rect[2] - rect[0]
+                win_height = rect[3] - rect[1]
+            
+            if self.is_window_minimized(hwnd):
+                win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                
+            win_width = min(win_width, mon_width)
+            win_height = min(win_height, mon_height)
+            
+            new_x = mon_x + (mon_width - win_width) // 2
+            new_y = mon_y + (mon_height - win_height) // 2
+            
+            win32gui.SetWindowPos(hwnd, win32con.HWND_TOP,
+                                   new_x, new_y, win_width, win_height,
+                                   win32con.SWP_SHOWWINDOW)
+            
+            self.status_var.set(f"Moved to {target_monitor['short_name']}")
+            self.log_debug(f"Moved window to {target_monitor['short_name']}")
+            
+        except Exception as e:
+            self.status_var.set(f"Error: {e}")
+            self.log_debug(f"Error quick moving window {hwnd}: {e}", "ERROR")
         
     def create_window_card(self, hwnd, title, process, pid, was_selected=False, has_audio=False):
         """Create a sleek window card"""
@@ -1013,6 +1133,11 @@ class WindowManager:
                      'activebackground': self.colors['card_hover'],
                      'activeforeground': self.colors['fg'], 'cursor': 'hand2'}
         
+        # Monitor swap button (◀ with dropdown)
+        monitor_btn = tk.Button(actions, text="◀", **btn_style)
+        monitor_btn.configure(command=lambda e=None, h=hwnd, b=monitor_btn: self.show_monitor_menu_btn(h, b))
+        monitor_btn.pack(side=tk.LEFT)
+        
         # Focus button
         focus_btn = tk.Button(actions, text="◉", command=lambda h=hwnd: self.focus_window(h), **btn_style)
         focus_btn.pack(side=tk.LEFT)
@@ -1038,8 +1163,9 @@ class WindowManager:
             'actions': actions,
             'checkbox': cb,
             'indicator': indicator,
-            'buttons': [focus_btn, minmax_btn, audio_btn],
+            'buttons': [monitor_btn, focus_btn, minmax_btn, audio_btn],
             'audio_btn': audio_btn,
+            'monitor_btn': monitor_btn,
             'base_bg': base_bg,
             'pid': pid,
             'has_audio': has_audio
@@ -1078,6 +1204,32 @@ class WindowManager:
         card.bind('<Enter>', on_enter)
         card.bind('<Leave>', on_leave)
     
+    def show_monitor_menu_btn(self, hwnd, btn):
+        """Show monitor menu positioned relative to button"""
+        # Create a fake event with the button's position
+        x = btn.winfo_rootx()
+        y = btn.winfo_rooty() + btn.winfo_height()
+        
+        menu = tk.Menu(self.root, tearoff=0, bg=self.colors['card'], fg=self.colors['fg'],
+                       activebackground=self.colors['accent'], activeforeground='white',
+                       font=('Segoe UI', 9))
+        
+        current_monitor_idx = self.get_window_monitor_index(hwnd)
+        
+        for i, mon in enumerate(self.monitors):
+            if i == current_monitor_idx:
+                # Current monitor - greyed out with star
+                menu.add_command(label=f"★ {mon['short_name']}", state='disabled')
+            else:
+                # Other monitors - clickable
+                menu.add_command(label=f"  {mon['short_name']}", 
+                               command=lambda h=hwnd, m=mon: self.quick_move_to_monitor(h, m))
+        
+        try:
+            menu.tk_popup(x, y)
+        finally:
+            menu.grab_release()
+    
     def toggle_minmax(self, hwnd):
         """Toggle between minimized and maximized states"""
         self.ensure_topmost_during_action()
@@ -1104,7 +1256,7 @@ class WindowManager:
             
         current_mute = self.get_app_mute(pid)
         if current_mute is None:
-            self.status_var.set("No audio session for this app")
+            self.status_var.set("No audio session (app may not be playing audio)")
             self.log_debug(f"No audio session for PID {pid}", "WARNING")
             return
             
@@ -1125,7 +1277,7 @@ class WindowManager:
             
         current_volume = self.get_app_volume(pid)
         if current_volume is None:
-            self.status_var.set("No audio session for this app")
+            self.status_var.set("No audio session (app may not be playing audio)")
             return
         
         self.log_debug(f"Opening volume slider for PID {pid}, current volume: {current_volume:.0%}")

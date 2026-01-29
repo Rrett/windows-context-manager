@@ -1,13 +1,12 @@
 import tkinter as tk
 from tkinter import ttk
 import ctypes
-from ctypes import wintypes, POINTER, Structure, byref, cast
+from ctypes import wintypes, Structure
 import win32gui
 import win32con
 import win32process
 import win32api
-from comtypes import CLSCTX_ALL, CoCreateInstance, GUID
-from comtypes.persist import STGM_READ
+from comtypes import GUID
 import psutil
 from collections import OrderedDict
 
@@ -68,6 +67,21 @@ class WindowManager:
         self.setup_styles()
         self.setup_ui()
         self.refresh_windows()
+    
+    def is_window_maximized(self, hwnd):
+        """Check if a window is maximized"""
+        try:
+            placement = win32gui.GetWindowPlacement(hwnd)
+            return placement[1] == win32con.SW_SHOWMAXIMIZED
+        except:
+            return False
+    
+    def is_window_minimized(self, hwnd):
+        """Check if a window is minimized"""
+        try:
+            return win32gui.IsIconic(hwnd)
+        except:
+            return False
         
     def setup_styles(self):
         """Configure ttk styles for sleek appearance"""
@@ -168,26 +182,6 @@ class WindowManager:
         devices = {}
         
         try:
-            # Import COM interfaces
-            from comtypes import CLSCTX_ALL, CoCreateInstance
-            import comtypes
-            
-            # MMDevice API GUIDs
-            CLSID_MMDeviceEnumerator = GUID('{BCDE0395-E52F-467C-8E3D-C4579291692E}')
-            IID_IMMDeviceEnumerator = GUID('{A95664D2-9614-4F35-A746-DE8DB63617E6}')
-            
-            # EDataFlow and ERole enums
-            eRender = 0  # Audio output devices
-            eConsole = 0
-            DEVICE_STATE_ACTIVE = 0x00000001
-            
-            # Load the MMDeviceAPI
-            MMDeviceApiLib = ctypes.windll.LoadLibrary("MMDevApi.dll")
-            
-            # Use pycaw for simpler access
-            from pycaw.pycaw import AudioUtilities
-            
-            # Get all audio devices
             import winreg
             
             # Enumerate audio endpoints from registry
@@ -269,7 +263,7 @@ class WindowManager:
                         import json
                         data = json.loads(result.stdout)
                         if isinstance(data, list):
-                            devices = {d['Name']: str(i) for i, d in enumerate(data)}
+                            devices = {d['Name']: str(idx) for idx, d in enumerate(data)}
                         elif isinstance(data, dict):
                             devices = {data['Name']: "0"}
                 except:
@@ -645,14 +639,14 @@ class WindowManager:
                 win_height = rect[3] - rect[1]
                 
                 # Restore if maximized
-                if win32gui.IsZoomed(hwnd):
+                if self.is_window_maximized(hwnd):
                     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                     rect = win32gui.GetWindowRect(hwnd)
                     win_width = rect[2] - rect[0]
                     win_height = rect[3] - rect[1]
                 
                 # Restore if minimized
-                if win32gui.IsIconic(hwnd):
+                if self.is_window_minimized(hwnd):
                     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                     
                 # Constrain size to monitor
@@ -756,7 +750,7 @@ class WindowManager:
             return
             
         # Show limitation info
-        self.status_var.set(f"Audio routing requires system API - see Windows Sound settings")
+        self.status_var.set("Audio routing requires system API - see Windows Sound settings")
         
         # Open Windows sound settings
         try:

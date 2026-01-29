@@ -937,17 +937,24 @@ class WindowManager:
             self.export_debug_log()
     
     def ensure_topmost_during_action(self):
-        """Temporarily ensure window is on top"""
-        was_pinned = self.pin_to_top.get()
+        """Temporarily ensure window is on top during actions"""
+        # Cancel any pending restore job
+        if hasattr(self, '_restore_job') and self._restore_job:
+            self.root.after_cancel(self._restore_job)
+            self._restore_job = None
+    
+        # Always bring to top during action
         self.root.attributes('-topmost', True)
         self.root.lift()
         self.root.update_idletasks()
-        
-        if not was_pinned:
-            if hasattr(self, '_restore_job') and self._restore_job:
-                self.root.after_cancel(self._restore_job)
-            self._restore_job = self.root.after(200, lambda: self.root.attributes('-topmost', False))
     
+        # After 1 second, restore based on checkbox state
+        def restore_topmost():
+            self._restore_job = None
+            if not self.pin_to_top.get():
+                self.root.attributes('-topmost', False)
+    
+        self._restore_job = self.root.after(1000, restore_topmost)
     def is_window_maximized(self, hwnd):
         """Check if a window is maximized"""
         try:
